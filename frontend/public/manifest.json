@@ -1,0 +1,15 @@
+{
+  "name": "Taiwan Stock AI Platform",
+  "short_name": "TW Stock AI",
+  "description": "AI 驅動的台股每日 TOP 10 強勢股 · 三維評分系統",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0B0E11",
+  "theme_color": "#0B0E11",
+  "lang": "zh-Hant",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any maskable" },
+    { "src": "/icon-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
