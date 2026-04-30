@@ -1,53 +1,30 @@
 services:
   - type: web
     name: taiwan-stock-ai-api
-    runtime: python
+    env: python
     plan: free
+
     rootDir: backend
-    buildCommand: pip install -r requirements.txt && alembic upgrade head
+
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      alembic upgrade head
+
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+
     healthCheckPath: /api/v1/health
-    autoDeploy: true
+
     envVars:
-      - key: APP_ENV
-        value: production
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: APP_ENV
+        value: production
       - key: DATABASE_URL
-        fromDatabase:
-          name: taiwan-stock-ai-db
-          property: connectionString
+        value: sqlite+aiosqlite:///./app.db
       - key: JWT_SECRET
-        generateValue: true
-      - key: STRIPE_SECRET_KEY
-        sync: false
-      - key: STRIPE_WEBHOOK_SECRET
-        sync: false
-      - key: STRIPE_PRICE_PRO
-        sync: false
-      - key: STRIPE_PRICE_ELITE
-        sync: false
-      - key: LINE_CHANNEL_TOKEN
-        sync: false
-      - key: LINE_CHANNEL_SECRET
-        sync: false
-      - key: RESEND_API_KEY
-        sync: false
-      - key: SENDGRID_API_KEY
-        sync: false
-      - key: EMAIL_FROM
-        sync: false
+        value: change_me_now_123
       - key: SCHEDULER_ENABLED
-        value: "true"
-      - key: SCHEDULER_TIMEZONE
-        value: Asia/Taipei
-      - key: APP_BASE_URL
-        sync: false
+        value: "false"
       - key: CORS_ORIGINS
-        sync: false
-
-databases:
-  - name: taiwan-stock-ai-db
-    plan: free
-    databaseName: taiwan_stock_ai
-    postgresMajorVersion: 16
+        value: https://taiwan-stock-ai-platform.vercel.app,http://localhost:3000

@@ -9,6 +9,7 @@ from alembic import context
 
 from app.core.config import get_settings
 from app.db.base import Base
+from app.db.session import _normalize_async_url
 from app.db import models  # noqa: F401 — register metadata
 
 config = context.config
@@ -16,14 +17,14 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url)
+config.set_main_option("sqlalchemy.url", _normalize_async_url(settings.database_url))
 
 target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
     context.configure(
-        url=settings.database_url,
+        url=_normalize_async_url(settings.database_url),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
