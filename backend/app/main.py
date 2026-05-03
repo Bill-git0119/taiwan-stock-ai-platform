@@ -7,6 +7,7 @@ from loguru import logger
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.services import scheduler as scheduler_svc
+from app.services.admin_bootstrap import run_admin_bootstrap
 
 settings = get_settings()
 
@@ -19,6 +20,11 @@ async def lifespan(app: FastAPI):
             scheduler_svc.start()
         except Exception as e:
             logger.warning("scheduler failed to start: {}", e)
+    if settings.app_env != "test":
+        try:
+            await run_admin_bootstrap()
+        except Exception as e:
+            logger.warning("admin bootstrap failed: {}", e)
     yield
     scheduler_svc.stop()
     logger.info("Taiwan Stock AI Platform shutting down")

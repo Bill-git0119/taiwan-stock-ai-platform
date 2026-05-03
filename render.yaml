@@ -28,3 +28,10 @@ services:
         value: "false"
       - key: CORS_ORIGINS
         value: https://taiwan-stock-ai-platform.vercel.app,http://localhost:3000
+      # Admin bootstrap — every startup, this email gets elite + is_admin.
+      # If user doesn't exist (ephemeral SQLite wiped), it's auto-created
+      # using BOOTSTRAP_ADMIN_PASSWORD so you can log in immediately.
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        value: zhangbaixun93@gmail.com
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
