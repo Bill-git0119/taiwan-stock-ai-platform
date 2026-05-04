@@ -38,6 +38,12 @@ data/cache/*
 !data/cache/.gitkeep
 data/raw/*
 !data/raw/.gitkeep
+
+# SQLite local dev DBs (Postgres is used in production)
+*.db
+*.sqlite
+*.sqlite3
+!**/migrations/**/*.db
 data/processed/*
 !data/processed/.gitkeep
 logs/*

@@ -1,3 +1,9 @@
+databases:
+  - name: taiwan-stock-db
+    plan: free
+    databaseName: taiwan_stock
+    postgresMajorVersion: "16"
+
 services:
   - type: web
     name: taiwan-stock-ai-api
@@ -11,7 +17,13 @@ services:
       pip install -r requirements.txt
       alembic upgrade head
 
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # On every deploy: run migrations, backfill historical data once, then serve.
+    # Backfill is idempotent — upsert keys are (stock_id, date), so re-running
+    # is a cheap no-op once the data is present.
+    startCommand: |
+      alembic upgrade head
+      python scripts/seed_data.py || true
+      uvicorn app.main:app --host 0.0.0.0 --port $PORT
 
     healthCheckPath: /api/v1/health
 
@@ -21,16 +33,21 @@ services:
       - key: APP_ENV
         value: production
       - key: DATABASE_URL
-        value: sqlite+aiosqlite:///./app.db
+        fromDatabase:
+          name: taiwan-stock-db
+          property: connectionString
       - key: JWT_SECRET
-        value: change_me_now_123
+        sync: false
+      # Daily APScheduler jobs (Asia/Taipei): 15:10 ingest, 15:20 score,
+      # 15:25 precompute trade plans.
       - key: SCHEDULER_ENABLED
-        value: "false"
+        value: "true"
+      - key: SCHEDULER_TIMEZONE
+        value: Asia/Taipei
       - key: CORS_ORIGINS
         value: https://taiwan-stock-ai-platform.vercel.app,http://localhost:3000
       # Admin bootstrap — every startup, this email gets elite + is_admin.
-      # If user doesn't exist (ephemeral SQLite wiped), it's auto-created
-      # using BOOTSTRAP_ADMIN_PASSWORD so you can log in immediately.
+      # Postgres persists, so this only auto-creates on first deploy.
       - key: BOOTSTRAP_ADMIN_EMAIL
         value: zhangbaixun93@gmail.com
       - key: BOOTSTRAP_ADMIN_PASSWORD
