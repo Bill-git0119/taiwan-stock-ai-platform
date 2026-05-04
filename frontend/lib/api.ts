@@ -218,4 +218,37 @@ export const api = {
   blogPost: (slug: string) => request<{
     slug: string; title: string; summary: string; body_md: string; tags: string[]; published_at: string;
   }>(`/api/v1/blog/${encodeURIComponent(slug)}`),
+
+  // trade plan
+  tradePlan: (symbol: string, accountSize?: number) => {
+    const qs = accountSize ? `?account_size=${accountSize}` : "";
+    return request<TradePlanResponse>(`/api/v1/trade-plan/${encodeURIComponent(symbol)}${qs}`);
+  },
 };
+
+export interface TradePlanResponse {
+  symbol: string;
+  bias: "LONG" | "SHORT" | "NO_TRADE";
+  setup?: string | null;
+  entry_zone?: [number, number] | null;
+  stop_loss?: number | null;
+  take_profit?: [number, number] | null;
+  risk_reward?: number | null;
+  confidence: number;
+  chip_score: number;
+  technical_score: number;
+  fundamental_score: number;
+  reasons: string[];
+  indicators: Record<string, number | string | boolean | null>;
+  chip: Record<string, number | string | boolean | null>;
+  no_trade_reason?: string | null;
+  last_close?: number | null;
+  atr?: number | null;
+  position_size_hint?: {
+    account_size: number;
+    risk_pct: number;
+    max_risk_twd: number;
+    suggested_shares: number;
+    suggested_notional: number;
+  } | null;
+}

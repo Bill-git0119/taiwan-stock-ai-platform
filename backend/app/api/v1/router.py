@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     admin, auth, backtest, billing, blog, health, leaderboard, market, notify,
-    referral, stocks,
+    referral, stocks, trade_plan,
 )
 
 api_router = APIRouter()
@@ -17,6 +17,7 @@ api_router.include_router(backtest.router, prefix="/backtest", tags=["backtest"]
 api_router.include_router(referral.router, prefix="/referral", tags=["referral"])
 api_router.include_router(leaderboard.router, prefix="/leaderboard", tags=["leaderboard"])
 api_router.include_router(blog.router, prefix="/blog", tags=["blog"])
+api_router.include_router(trade_plan.router, prefix="/trade-plan", tags=["trade-plan"])
 
 # Convenience shortcut: GET /api/v1/top10
 api_router.add_api_route("/top10", stocks.get_top10, methods=["GET"], tags=["stocks"])

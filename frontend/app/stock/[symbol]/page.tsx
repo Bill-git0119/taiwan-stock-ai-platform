@@ -8,6 +8,7 @@ import { AnalysisCards } from "@/components/stock/AnalysisCards";
 import { RecentTrend } from "@/components/stock/RecentTrend";
 import { ScoreBreakdown } from "@/components/stock/ScoreBreakdown";
 import { TradingViewChart } from "@/components/stock/TradingViewChart";
+import { TradePlanCard } from "@/components/stock/TradePlanCard";
 
 async function loadStock(symbol: string): Promise<StockDetail | null> {
   try {
@@ -74,6 +75,8 @@ export default async function StockPage({
             {score && <ScoreBreakdown score={score} />}
           </div>
         </div>
+
+        <TradePlanCard symbol={detail.symbol} />
 
         <RecentTrend prices={detail.prices} />
 
