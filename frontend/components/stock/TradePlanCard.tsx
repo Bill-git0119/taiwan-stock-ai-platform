@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Target, Shield, TrendingUp, AlertTriangle } from "lucide-react";
+import { Target, Shield, TrendingUp, AlertTriangle, Database, AlertCircle } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { api, type TradePlanResponse } from "@/lib/api";
@@ -37,17 +37,34 @@ export function TradePlanCard({ symbol }: { symbol: string }) {
   }
 
   if (plan.bias === "NO_TRADE") {
+    const noData = plan.no_trade_reason === "NO_REAL_DATA";
     return (
       <Card>
-        <CardHeader title="交易計畫" subtitle={`${plan.symbol} · 不建議進場`} />
+        <CardHeader
+          title="交易計畫"
+          subtitle={`${plan.symbol} · ${noData ? "資料尚未灌入" : "不建議進場"}`}
+          right={<DataSourceBadge source={plan.data_source} />}
+        />
         <div className="p-6 flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-text-muted mt-0.5" />
+          {noData ? (
+            <AlertCircle className="w-5 h-5 text-accent mt-0.5" />
+          ) : (
+            <AlertTriangle className="w-5 h-5 text-text-muted mt-0.5" />
+          )}
           <div className="text-sm">
-            <div className="text-text-bright font-medium">NO TRADE</div>
-            <div className="text-text-muted mt-1">理由：{plan.no_trade_reason ?? "未滿足進場條件"}</div>
-            <div className="text-xs text-text-muted mt-3">
-              信心 {(plan.confidence * 100).toFixed(0)}% · 籌碼 {plan.chip_score} · 技術 {plan.technical_score}
+            <div className="text-text-bright font-medium">
+              {noData ? "等待資料更新" : "NO TRADE"}
             </div>
+            <div className="text-text-muted mt-1">
+              {noData
+                ? "此標的尚未在資料庫中（每日 15:10 自動灌入）。當日盤後會自動產生交易計畫。"
+                : `理由：${plan.no_trade_reason ?? "未滿足進場條件"}`}
+            </div>
+            {!noData && (
+              <div className="text-xs text-text-muted mt-3">
+                信心 {(plan.confidence * 100).toFixed(0)}% · 籌碼 {plan.chip_score} · 技術 {plan.technical_score}
+              </div>
+            )}
           </div>
         </div>
       </Card>
@@ -65,14 +82,17 @@ export function TradePlanCard({ symbol }: { symbol: string }) {
         title="交易計畫"
         subtitle={`${plan.symbol} · ${SETUP_LABEL[plan.setup ?? ""] ?? plan.setup}`}
         right={
-          <span className={cn(
-            "px-2 py-1 rounded text-[10px] uppercase tracking-widest font-mono",
-            plan.bias === "LONG"
-              ? "bg-up/15 text-up border border-up/30"
-              : "bg-down/15 text-down border border-down/30",
-          )}>
-            {plan.bias}
-          </span>
+          <div className="flex items-center gap-2">
+            <DataSourceBadge source={plan.data_source} />
+            <span className={cn(
+              "px-2 py-1 rounded text-[10px] uppercase tracking-widest font-mono",
+              plan.bias === "LONG"
+                ? "bg-up/15 text-up border border-up/30"
+                : "bg-down/15 text-down border border-down/30",
+            )}>
+              {plan.bias}
+            </span>
+          </div>
         }
       />
       <div className="p-5 space-y-5">
@@ -124,6 +144,24 @@ export function TradePlanCard({ symbol }: { symbol: string }) {
       </div>
     </Card>
   );
+}
+
+function DataSourceBadge({ source }: { source?: string }) {
+  if (source === "real") {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider font-mono bg-up/10 text-up border border-up/30">
+        <Database className="w-3 h-3" />real
+      </span>
+    );
+  }
+  if (source === "none") {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider font-mono bg-bg-elevated text-text-muted border border-line">
+        <Database className="w-3 h-3" />no data
+      </span>
+    );
+  }
+  return null;
 }
 
 function Tile({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: string; tone: string }) {

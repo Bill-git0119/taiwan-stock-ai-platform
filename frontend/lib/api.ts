@@ -224,7 +224,78 @@ export const api = {
     const qs = accountSize ? `?account_size=${accountSize}` : "";
     return request<TradePlanResponse>(`/api/v1/trade-plan/${encodeURIComponent(symbol)}${qs}`);
   },
+
+  // scanner — strong-stock workflow for short-term traders
+  scan: (params?: {
+    bias?: "LONG" | "SHORT" | "NO_TRADE";
+    setup?: string;
+    min_rr?: number;
+    min_confidence?: number;
+    limit?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.bias) q.set("bias", params.bias);
+    if (params?.setup) q.set("setup", params.setup);
+    if (params?.min_rr !== undefined) q.set("min_rr", String(params.min_rr));
+    if (params?.min_confidence !== undefined) q.set("min_confidence", String(params.min_confidence));
+    if (params?.limit !== undefined) q.set("limit", String(params.limit));
+    const s = q.toString();
+    return request<ScanResponse>(`/api/v1/scanner/scan${s ? `?${s}` : ""}`);
+  },
+  movers: () => request<MoversResponse>("/api/v1/scanner/movers"),
+  sectors: () => request<SectorsResponse>("/api/v1/scanner/sectors"),
 };
+
+export interface ScanItem extends TradePlanResponse {
+  name: string;
+  market: string;
+  edge: number;
+  data_source?: string;
+}
+
+export interface ScanResponse {
+  scanned: number;
+  matched: number;
+  items: ScanItem[];
+}
+
+export interface MoverRow {
+  symbol: string;
+  name: string;
+  last: number;
+  open: number;
+  gap_pct: number;
+  d1_pct: number;
+  d5_pct: number;
+  d20_pct: number;
+  volume: number;
+  volume_ratio: number;
+  breakout_20: boolean;
+  date: string;
+}
+
+export interface MoversResponse {
+  scanned: number;
+  gainers: MoverRow[];
+  losers: MoverRow[];
+  gap_ups: MoverRow[];
+  volume_spikes: MoverRow[];
+  breakouts: MoverRow[];
+  momentum_5d: MoverRow[];
+  momentum_20d: MoverRow[];
+}
+
+export interface SectorRow {
+  sector: string;
+  count: number;
+  avg_d1_pct: number;
+  avg_d5_pct: number;
+  leaders: Array<{ symbol: string; name: string; last: number; d1_pct: number; d5_pct: number }>;
+}
+
+export interface SectorsResponse {
+  sectors: SectorRow[];
+}
 
 export interface TradePlanResponse {
   symbol: string;
@@ -251,4 +322,5 @@ export interface TradePlanResponse {
     suggested_shares: number;
     suggested_notional: number;
   } | null;
+  data_source?: string;
 }

@@ -67,24 +67,24 @@ export default async function LandingPage() {
             <Link href="/register">
               <Button size="lg" className="gap-2">立即免費試用 <ArrowRight className="w-4 h-4" /></Button>
             </Link>
-            <Link href="/dashboard">
-              <Button variant="secondary" size="lg">查看今日 Top10</Button>
+            <Link href="/scanner">
+              <Button variant="secondary" size="lg">⚡ 開啟強勢股 Scanner</Button>
             </Link>
           </div>
           <p className="mt-4 text-[11px] text-text-muted">免信用卡 · 30 秒開通 · Free 方案永久免費</p>
         </div>
       </section>
 
-      {/* Social Proof */}
+      {/* Trust signals — verifiable claims only */}
       <section className="border-b border-line">
         <div className="max-w-6xl mx-auto px-6 py-10 grid grid-cols-3 gap-6 text-center">
           {[
-            { num: "5,000+", label: "註冊用戶" },
-            { num: "62%", label: "AI 選股月勝率" },
-            { num: "1,200+", label: "推薦人數" },
+            { num: "鐵律", label: "RR ≥ 1.5 · 1% 風險" },
+            { num: "0", label: "Lookahead bias" },
+            { num: "TWSE / TPEX", label: "公開資料源" },
           ].map((s) => (
             <div key={s.label}>
-              <div className="text-3xl md:text-4xl font-bold font-mono text-text-bright">{s.num}</div>
+              <div className="text-2xl md:text-3xl font-bold font-mono text-text-bright">{s.num}</div>
               <div className="mt-1 text-xs uppercase tracking-widest text-text-muted">{s.label}</div>
             </div>
           ))}
@@ -213,7 +213,7 @@ export default async function LandingPage() {
             今天就讓 AI 幫你篩選台股
           </h2>
           <p className="mt-4 text-sm md:text-base text-text-muted">
-            5,000+ 投資人正在使用 · 免信用卡 · 30 秒開通
+            交易鐵律自動把關 · 免信用卡 · 30 秒開通
           </p>
           <div className="mt-8 flex items-center justify-center gap-3 flex-wrap">
             <Link href="/register">

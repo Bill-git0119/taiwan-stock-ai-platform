@@ -31,6 +31,7 @@ export function Topbar() {
         </Link>
         <nav className="hidden md:flex items-center gap-5 text-sm text-text-muted">
           <Link href="/dashboard" className="hover:text-text-bright">Dashboard</Link>
+          <Link href="/scanner" className="hover:text-accent font-medium text-text-bright">⚡ Scanner</Link>
           <Link href="/leaderboard" className="hover:text-text-bright">Leaderboard</Link>
           <Link href="/backtest" className="hover:text-text-bright">Backtest</Link>
           <Link href="/blog" className="hover:text-text-bright">Blog</Link>
