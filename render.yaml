@@ -52,3 +52,14 @@ services:
         value: zhangbaixun93@gmail.com
       - key: BOOTSTRAP_ADMIN_PASSWORD
         sync: false
+      # Seed configuration — on first boot pull 5 years of OHLCV for the full
+      # curated TOP100 universe, then replay 2 years through trade_plan_engine
+      # so edge_signals + scanner / brief have real numbers from day 1.
+      - key: SEED_YEARS
+        value: "5"
+      - key: SEED_MIN_ROWS
+        value: "1000"
+      - key: SEED_REPLAY
+        value: "true"
+      - key: SEED_REPLAY_YEARS
+        value: "2"
