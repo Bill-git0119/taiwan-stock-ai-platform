@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Target, Shield, TrendingUp, AlertTriangle, Database, AlertCircle } from "lucide-react";
+import {
+  Target, Shield, TrendingUp, AlertTriangle, Database, AlertCircle,
+  Activity, ShieldCheck,
+} from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { api, type TradePlanResponse } from "@/lib/api";
@@ -11,6 +14,15 @@ const SETUP_LABEL: Record<string, string> = {
   trend_breakout_retest: "突破回踩",
   ma20_support_bounce: "MA20 支撐反彈",
   chip_follow_long: "籌碼跟單",
+};
+
+const REGIME_TONE: Record<string, string> = {
+  trending_up: "text-up border-up/40 bg-up/10",
+  trending_up_weak: "text-up/80 border-up/30 bg-up/5",
+  trending_down: "text-down border-down/40 bg-down/10",
+  bearish: "text-down border-down/40 bg-down/10",
+  sideways: "text-text-muted border-line bg-bg-elevated/40",
+  unknown: "text-text-muted border-line bg-bg-elevated/40",
 };
 
 export function TradePlanCard({ symbol }: { symbol: string }) {
@@ -130,6 +142,117 @@ export function TradePlanCard({ symbol }: { symbol: string }) {
                   <span className="text-up mt-0.5">✓</span><span>{r}</span>
                 </li>
               ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Market regime block — informs trader whether this setup is allowed today */}
+        {plan.regime && (
+          <div className="grid grid-cols-3 gap-3 pt-2 border-t border-line text-xs">
+            <div>
+              <div className="text-[10px] uppercase text-text-muted mb-1">市場狀態</div>
+              <div className={cn(
+                "inline-block px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider border",
+                REGIME_TONE[plan.regime.label] ?? REGIME_TONE.unknown,
+              )}>
+                {plan.regime.label.replace(/_/g, " ")}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase text-text-muted mb-1">ADX(14)</div>
+              <div className="font-mono text-text-bright">{plan.regime.adx?.toFixed(1) ?? "—"}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase text-text-muted mb-1">EMA200 斜率</div>
+              <div className="font-mono text-text-bright">
+                {plan.regime.ema200_slope_pct != null
+                  ? `${plan.regime.ema200_slope_pct >= 0 ? "+" : ""}${plan.regime.ema200_slope_pct.toFixed(3)}%`
+                  : "—"}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Validation history — only when we have evaluated edge_signals */}
+        {(plan as any).validation && (plan as any).validation.status !== "n/a" && (
+          <div className="rounded-md border border-line bg-bg-elevated/40 p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <ShieldCheck className={cn(
+                "w-3.5 h-3.5",
+                (plan as any).validation.status === "validated" ? "text-up" : "text-text-muted",
+              )} />
+              <span className="text-[10px] uppercase tracking-widest text-text-bright">
+                Setup 歷史表現
+              </span>
+              <span className={cn(
+                "ml-auto px-1.5 py-0.5 rounded text-[10px] uppercase font-mono border",
+                (plan as any).validation.status === "validated"
+                  ? "text-up border-up/40 bg-up/10"
+                  : "text-amber-400 border-amber-400/40 bg-amber-400/10",
+              )}>
+                {(plan as any).validation.status === "validated" ? "已驗證" : "樣本不足"}
+              </span>
+            </div>
+            <div className="grid grid-cols-4 gap-2 text-xs font-mono">
+              <div>
+                <div className="text-[10px] text-text-muted">勝率</div>
+                <div className="text-text-bright">
+                  {(plan as any).validation.win_rate != null
+                    ? `${((plan as any).validation.win_rate * 100).toFixed(0)}%`
+                    : "—"}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] text-text-muted">期望值</div>
+                <div className={cn(
+                  ((plan as any).validation.expectancy_r ?? 0) >= 0 ? "text-up" : "text-down"
+                )}>
+                  {(plan as any).validation.expectancy_r != null
+                    ? `${(plan as any).validation.expectancy_r >= 0 ? "+" : ""}${(plan as any).validation.expectancy_r.toFixed(2)}R`
+                    : "—"}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] text-text-muted">PF</div>
+                <div className="text-text-bright">
+                  {(plan as any).validation.profit_factor != null
+                    ? (plan as any).validation.profit_factor.toFixed(2)
+                    : "—"}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] text-text-muted">樣本數</div>
+                <div className="text-text-muted">
+                  {(plan as any).validation.sample_size ?? 0}
+                </div>
+              </div>
+            </div>
+            {(plan as any).validation.status !== "validated" && (
+              <p className="mt-2 text-[10px] text-text-muted">
+                此 setup 累積樣本不足，系統將其視為「研究候選」而非實單機會。
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Management rules */}
+        {plan.management && (
+          <div className="rounded-md border border-line bg-bg-elevated/40 p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Activity className="w-3.5 h-3.5 text-accent" />
+              <span className="text-[10px] uppercase tracking-widest text-text-bright">
+                動態出場規則
+              </span>
+            </div>
+            <ul className="text-[11px] text-text-muted space-y-1 leading-relaxed">
+              <li>• 達 +{plan.management.move_to_breakeven_at_r}R 時將停損移到成本價（break-even）</li>
+              <li>• 之後採 {plan.management.trailing_stop_atr_mult}× ATR 移動停損
+                {plan.management.trailing_stop_value != null && (
+                  <span className="text-text"> · 目前位置 ≈ {plan.management.trailing_stop_value}</span>
+                )}
+              </li>
+              <li>• TP1 出 {plan.management.scale_out_tp1_pct}%、TP2 出 {plan.management.scale_out_tp2_pct}%</li>
+              <li>• 最長持有 {plan.management.max_hold_bars} 根日 K，未達 TP/SL 則出場</li>
             </ul>
           </div>
         )}

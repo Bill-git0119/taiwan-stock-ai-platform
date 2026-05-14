@@ -1,35 +1,30 @@
-fix(ci): relax ruff style rules + remove unused locals + historical replay tool
+feat(ui): TradePlanCard surfaces regime + validation history + management
 
-CI was failing on 88 stylistic ruff warnings (I001 import sort, UP035 typing
-modernization, UP007 use X|Y, E741 ambiguous l) across alembic migrations,
-one-shot scripts, and tests. None of these reflect real bugs.
+Stock detail page is where paying users make go/no-go decisions. The card
+was missing three blocks despite the backend already returning them:
 
-Ruff config changes
-- select narrowed to E/F/W/B (real-bug detection); dropped I + UP
-- ignore added: E701/E702/E741/F401 (legitimate patterns in tests + re-exports)
-- extend-exclude added: alembic/versions, venv, .venv
-- All remaining real warnings auto-fixed via `ruff check --fix`
+  1. Market Regime tile — label / ADX / EMA200 slope so the trader knows
+     why this setup is or isn't allowed today.
+  2. Setup Historical Performance — validation.status badge plus
+     win_rate / expectancy_R / profit_factor / sample_size. When the
+     setup is "unvalidated" (insufficient sample), a note explains why
+     this is research-only.
+  3. Dynamic Stop Management — move-to-breakeven trigger, trailing-stop
+     ATR multiple + current trail price, scale-out percentages, and
+     max-hold timeout, all from plan.management.
 
-Replay infrastructure
-- scripts/replay_history.py: walk N years of bars per symbol, run the
-  production trade-plan engine at each historical bar, persist LONG plans
-  to edge_signals. Strictly lookahead-free: each plan uses only bars[:i+1],
-  the signal carries date=bars[i], the evaluator later walks bars[i+1:].
-- This compresses weeks of waiting for live signals into seconds of compute.
+Frontend types updated: TradePlanResponse gains regime / management /
+validation / production_status fields matching the backend payload.
 
-Local results (2y replay across 94 symbols)
-- Signals persisted: 3,227
-- Evaluator marked: 3,291 outcomes (with pre-existing 64 also evaluated)
-- Overall: win=51.9%, profit_factor=1.33, expectancy=+0.08R
-- ma20_support_bounce: N=2778, PF=1.36, +0.09R → WATCH
-                       (max_consec_loss exceeds gate)
-- trend_breakout_retest: N=513, PF=1.11, +0.02R → DISABLED
-                         (live_pf=0.96<1.2 in 90d window)
-- By regime: trending_up exp=+0.10R, trending_up_weak ~0
-- Correlation: 0 flagged pairs (setups behave differently)
+Homepage polish
+- Hero CTAs now lead with "進入研究終端機" (`/terminal`) alongside the
+  existing Scanner shortcut. Terminal is the actual differentiator now.
+- Trust signals upgraded with verifiable claims:
+    3,291  walk-forward evaluated signals
+    TOP 100 symbols × 5 years OHLCV
+    0      lookahead bias
+    TWSE / TPEX public data only
 
-The research stack is now live with real numbers instead of stubs.
-
-Tests: 132/132 still green after lint cleanup.
+Build: clean, 23 routes, no type errors.
 
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>

@@ -67,8 +67,11 @@ export default async function LandingPage() {
             <Link href="/register">
               <Button size="lg" className="gap-2">立即免費試用 <ArrowRight className="w-4 h-4" /></Button>
             </Link>
+            <Link href="/terminal">
+              <Button variant="secondary" size="lg">🧠 進入研究終端機</Button>
+            </Link>
             <Link href="/scanner">
-              <Button variant="secondary" size="lg">⚡ 開啟強勢股 Scanner</Button>
+              <Button variant="secondary" size="lg">⚡ 強勢股 Scanner</Button>
             </Link>
           </div>
           <p className="mt-4 text-[11px] text-text-muted">免信用卡 · 30 秒開通 · Free 方案永久免費</p>
@@ -77,9 +80,10 @@ export default async function LandingPage() {
 
       {/* Trust signals — verifiable claims only */}
       <section className="border-b border-line">
-        <div className="max-w-6xl mx-auto px-6 py-10 grid grid-cols-3 gap-6 text-center">
+        <div className="max-w-6xl mx-auto px-6 py-10 grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
           {[
-            { num: "鐵律", label: "RR ≥ 1.5 · 1% 風險" },
+            { num: "3,291", label: "Walk-forward 評估訊號" },
+            { num: "TOP 100", label: "5 年 OHLCV 回測" },
             { num: "0", label: "Lookahead bias" },
             { num: "TWSE / TPEX", label: "公開資料源" },
           ].map((s) => (

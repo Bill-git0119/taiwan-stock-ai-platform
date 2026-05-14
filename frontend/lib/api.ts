@@ -502,4 +502,23 @@ export interface TradePlanResponse {
     suggested_notional: number;
   } | null;
   data_source?: string;
+  regime?: {
+    label: string;
+    adx?: number | null;
+    ema200_slope_pct?: number | null;
+    ema50_slope_pct?: number | null;
+    atr_contraction?: number | null;
+    allowed_setups: string[];
+    reason: string;
+  } | null;
+  management?: {
+    move_to_breakeven_at_r: number;
+    trailing_stop_atr_mult: number;
+    trailing_stop_value: number | null;
+    scale_out_tp1_pct: number;
+    scale_out_tp2_pct: number;
+    max_hold_bars: number;
+  } | null;
+  validation?: ValidationInfo | null;
+  production_status?: string;
 }
