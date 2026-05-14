@@ -71,7 +71,7 @@ def test_iron_rule_no_long_in_bearish():
 
 def test_allowed_setups_table_consistency():
     # No regime label maps to unknown setups
-    for label, setups in ALLOWED_SETUPS.items():
+    for _label, setups in ALLOWED_SETUPS.items():
         for s in setups:
             assert s in {
                 "trend_breakout_retest", "ma20_support_bounce", "chip_follow_long",

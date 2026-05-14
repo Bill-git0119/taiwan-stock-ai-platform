@@ -73,7 +73,6 @@ def test_no_lookahead_buy_fill_uses_next_bar_open():
     t = rep.trades[0]
     # Entry-fill price must come from the bar AFTER the signal bar.
     # Signal fired on first bar with len(history)>30 → fill bar 31's open ± slippage.
-    sig_bar = bars[30]
     next_open = bars[31]["open"]
     expected = next_open * (1 + (5 + 5) / 10_000)
     assert abs(t["entry"] - expected) < 1e-3  # round-to-4dp tolerance

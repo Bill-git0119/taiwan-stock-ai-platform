@@ -1,10 +1,25 @@
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Exclude generated / vendored / one-shot scripts from lint
+extend-exclude = ["alembic/versions", "venv", ".venv", "__pycache__"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "UP"]
-ignore = ["E501"]
+# Keep real-bug detection (E/F/W/B); drop stylistic-only rules
+# (I = import sort, UP = type-modernization) since they generate
+# churn-only diffs across migrations and scripts.
+select = ["E", "F", "W", "B"]
+ignore = [
+    "E501",   # line length — already capped at 100 and many strings exceed for clarity
+    "E402",   # module-level imports not at top — we use sys.path tricks
+    "B008",   # function calls in default args — common in FastAPI Depends()
+    "B904",   # raise from — not always meaningful
+    "E731",   # lambda assignment — fine in places
+    "E701",   # multiple statements one-line-with-colon — fine for empty Pydantic classes
+    "E702",   # multiple statements one-line-with-semicolon — fine in test fixtures
+    "E741",   # ambiguous variable names (l, I, O) — `lows` shorthand is legitimate
+    "F401",   # unused imports — common in __init__.py re-exports
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

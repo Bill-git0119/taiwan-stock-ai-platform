@@ -88,12 +88,6 @@ async def two_setup_signals():
         await s.execute(delete(EdgeSignal))
         await s.commit()
         sig_dates = [date.today() - timedelta(days=30 - i * 3) for i in range(10)]
-        plan = {
-            "symbol": "X", "bias": "LONG",
-            "entry_zone": [100.0, 100.5], "stop_loss": 98.0,
-            "take_profit": [104.0, 110.0], "risk_reward": 2.0,
-            "confidence": 0.6, "edge": 60.0,
-        }
         for i, d in enumerate(sig_dates):
             sig = EdgeSignal(
                 date=d, symbol=f"S{i}", setup="A", bias="LONG",
