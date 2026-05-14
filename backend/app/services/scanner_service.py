@@ -23,11 +23,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ChipData, DailyPrice, Stock
+from app.edge import edge_decay as _decay
 from app.services.edge_tracking_service import (
     SetupStats, WINRATE_MIN_SAMPLES, persist_signal, setup_stats,
 )
 from app.services.strategy_health import disabled_setups
 from app.services.trade_plan_engine import build_plan
+from app.strategy_registry.ranker import rank_all
 
 
 MIN_BARS = 60
@@ -138,6 +140,15 @@ async def scan_universe(
     stats_map = await setup_stats(session)
     disabled = set() if include_disabled else await disabled_setups(session)
 
+    # Strategy ranking — gives us live edge + production status per setup.
+    rankings = await rank_all(session)
+    rank_by_setup = {r.strategy: r for r in rankings}
+    decay_map = await _decay.decay_scores(session)
+    # Disabled-by-ranker takes precedence over health-disabled
+    if not include_disabled:
+        from app.strategy_registry.ranker import disabled_setups as _ds
+        disabled = disabled | _ds(rankings)
+
     stocks = (await session.execute(select(Stock))).scalars().all()
     rows: List[dict] = []
     for st in stocks:
@@ -166,6 +177,36 @@ async def scan_universe(
         rank, breakdown = _rank(plan, sstats)
         plan["rank"] = rank
         plan["rank_breakdown"] = breakdown
+
+        # Adaptive Score — live_edge_weighted_score:
+        #   setup_live_expectancy * regime_confidence * strategy_rank * chip_strength
+        setup_now = plan.get("setup") or ""
+        live_exp = (sstats.expectancy if sstats else 0.0)
+        rank_obj = rank_by_setup.get(setup_now)
+        strat_rank = rank_obj.rank_score if rank_obj else 0.0
+        production_status = rank_obj.production_status if rank_obj else "UNKNOWN"
+        regime_block = plan.get("regime") or {}
+        adx = regime_block.get("adx") or 0
+        regime_conf = min(1.0, max(0.0, adx / 40.0)) if adx else 0.3
+        chip = plan.get("chip") or {}
+        chip_strength = min(1.0, max(0.0,
+            0.5 + 0.25 * (chip.get("foreign_invest_alignment") or 0.0) +
+            0.10 * min(5, int(chip.get("foreign_streak") or 0)) / 5.0,
+        ))
+        adaptive = round(
+            max(0.0, live_exp) * regime_conf * max(0.05, strat_rank) * chip_strength * 100,
+            4,
+        )
+        plan["adaptive_score"] = adaptive
+        plan["adaptive_breakdown"] = {
+            "live_expectancy_R": round(live_exp, 4),
+            "regime_confidence": round(regime_conf, 4),
+            "strategy_rank": round(strat_rank, 4),
+            "chip_strength": round(chip_strength, 4),
+            "production_status": production_status,
+            "decay_label": (decay_map.get(setup_now, {}) or {}).get("label"),
+        }
+        plan["production_status"] = production_status
 
         # Signal Validation Layer — every signal must self-report its
         # validation status. UI / brief use this to decide whether to surface
@@ -213,12 +254,19 @@ async def scan_universe(
     if not include_disabled:
         out = [r for r in out if r.get("setup") not in disabled]
 
-    # New ranking: expectancy × frequency × confidence
-    out.sort(key=lambda r: (r.get("rank", 0), r.get("edge", 0)), reverse=True)
+    # Adaptive ranking — adaptive_score is the highest authority; rank +
+    # heuristic edge are tie-breakers.
+    out.sort(
+        key=lambda r: (r.get("adaptive_score", 0), r.get("rank", 0), r.get("edge", 0)),
+        reverse=True,
+    )
 
     # Optional: persist today's LONG signals so we can score them in 7 days
     if persist:
         from app.services.edge_tracking_service import persist_signal as _persist
+        # Build symbol->sector map from Stock rows so the persisted signal
+        # carries the sector tag (used in by_sector breakdowns later).
+        stock_sectors = {st.symbol: (st.sector or "其他") for st in stocks}
         regime_label = None
         for r in out:
             if r.get("bias") != "LONG":
@@ -231,6 +279,7 @@ async def scan_universe(
                 setup=r["setup"],
                 plan=r,
                 regime=regime_label,
+                sector=stock_sectors.get(r["symbol"]),
             )
 
     return {

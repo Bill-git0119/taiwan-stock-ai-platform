@@ -59,6 +59,7 @@ async def persist_signal(
     setup: str,
     plan: dict,
     regime: Optional[str] = None,
+    sector: Optional[str] = None,
     on_date: Optional[date] = None,
 ) -> Optional[EdgeSignal]:
     """Insert a row for today's LONG signal (no-op on duplicate)."""
@@ -87,6 +88,7 @@ async def persist_signal(
         setup=setup,
         bias="LONG",
         regime=regime,
+        sector=sector,
         entry=float(entry_zone[0]),
         stop_loss=float(sl),
         tp1=float(tp[0]),
@@ -126,43 +128,53 @@ def _evaluate_walk(sig: EdgeSignal, bars: List[DailyPrice]) -> dict:
 
     Pessimistic: if both stop and TP can hit on the same bar, stop wins.
     Entry fills at next bar open + slippage (lookahead-free).
+
+    Also tracks max favorable / adverse excursion in R units for telemetry.
     """
     if not bars:
         return {"exit_reason": "no_data", "exit_price": None, "realized_r": None,
-                "win": None, "bars_held": 0}
+                "win": None, "bars_held": 0, "mfe_r": None, "mae_r": None}
     fill_bar = bars[0]
     fill_price = float(fill_bar.open) * (1 + (SLIPPAGE_BPS + COMMISSION_BPS) / 10_000)
     risk = fill_price - sig.stop_loss
     if risk <= 0:
         return {"exit_reason": "invalid", "exit_price": fill_price, "realized_r": 0.0,
-                "win": False, "bars_held": 0}
+                "win": False, "bars_held": 0, "mfe_r": 0.0, "mae_r": 0.0}
 
     held = 0
+    mfe_r = 0.0
+    mae_r = 0.0
+
+    def _outcome(reason: str, exit_p: float, held_local: int) -> dict:
+        r = (exit_p - fill_price) / risk
+        return {
+            "exit_reason": reason, "exit_price": float(exit_p),
+            "realized_r": round(r, 4),
+            "win": reason in ("tp1", "tp2") or (reason == "timeout" and r > 0),
+            "bars_held": held_local,
+            "mfe_r": round(mfe_r, 4), "mae_r": round(mae_r, 4),
+        }
+
     for b in bars[1:]:
         held += 1
+        # excursions BEFORE exit checks — high/low both happen intrabar
+        mfe_r = max(mfe_r, (float(b.high) - fill_price) / risk)
+        mae_r = min(mae_r, (float(b.low) - fill_price) / risk)
         # pessimistic SL first
         if b.low <= sig.stop_loss:
             exit_p = sig.stop_loss * (1 - COMMISSION_BPS / 10_000)
-            r = (exit_p - fill_price) / risk
-            return {"exit_reason": "stop", "exit_price": float(exit_p),
-                    "realized_r": round(r, 4), "win": False, "bars_held": held}
+            return _outcome("stop", exit_p, held)
         if b.high >= sig.tp2:
             exit_p = sig.tp2 * (1 - COMMISSION_BPS / 10_000)
-            r = (exit_p - fill_price) / risk
-            return {"exit_reason": "tp2", "exit_price": float(exit_p),
-                    "realized_r": round(r, 4), "win": True, "bars_held": held}
+            return _outcome("tp2", exit_p, held)
         if b.high >= sig.tp1:
             exit_p = sig.tp1 * (1 - COMMISSION_BPS / 10_000)
-            r = (exit_p - fill_price) / risk
-            return {"exit_reason": "tp1", "exit_price": float(exit_p),
-                    "realized_r": round(r, 4), "win": True, "bars_held": held}
+            return _outcome("tp1", exit_p, held)
 
-    # ran out of horizon — close at last bar's close
+    # timeout
     last = bars[-1]
     exit_p = float(last.close) * (1 - COMMISSION_BPS / 10_000)
-    r = (exit_p - fill_price) / risk
-    return {"exit_reason": "timeout", "exit_price": exit_p,
-            "realized_r": round(r, 4), "win": r > 0, "bars_held": held}
+    return _outcome("timeout", exit_p, held)
 
 
 async def evaluate_open_signals(session: AsyncSession,
@@ -191,6 +203,8 @@ async def evaluate_open_signals(session: AsyncSession,
         sig.realized_r = result["realized_r"]
         sig.win = result["win"]
         sig.bars_held = result["bars_held"]
+        sig.mfe_r = result.get("mfe_r")
+        sig.mae_r = result.get("mae_r")
         n_eval += 1
     if n_eval:
         await session.commit()

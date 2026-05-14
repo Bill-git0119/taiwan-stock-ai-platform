@@ -224,14 +224,15 @@ class StockPick(Base):
 class EdgeSignal(Base):
     """Every LONG plan emitted by the scanner is persisted here.
 
-    Used to compute *real* historical performance per setup so the scanner
-    can rank by `expectancy * frequency * confidence` instead of a heuristic.
+    Used to compute *real* historical performance per setup, regime, sector.
     """
     __tablename__ = "edge_signals"
     __table_args__ = (
         UniqueConstraint("date", "symbol", "setup", name="uq_edge_signals_date_symbol_setup"),
         Index("ix_edge_signals_setup_date", "setup", "date"),
         Index("ix_edge_signals_evaluated", "evaluated"),
+        Index("ix_edge_signals_regime", "regime"),
+        Index("ix_edge_signals_sector", "sector"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -240,6 +241,7 @@ class EdgeSignal(Base):
     setup: Mapped[str] = mapped_column(String(48), nullable=False)
     bias: Mapped[str] = mapped_column(String(8), default="LONG")
     regime: Mapped[Optional[str]] = mapped_column(String(32))
+    sector: Mapped[Optional[str]] = mapped_column(String(48))
     entry: Mapped[float] = mapped_column(Float, nullable=False)
     stop_loss: Mapped[float] = mapped_column(Float, nullable=False)
     tp1: Mapped[float] = mapped_column(Float, nullable=False)
@@ -255,6 +257,61 @@ class EdgeSignal(Base):
     realized_r: Mapped[Optional[float]] = mapped_column(Float)      # in R units
     win: Mapped[Optional[bool]] = mapped_column(Boolean)
     bars_held: Mapped[Optional[int]] = mapped_column(Integer)
+    # Excursion telemetry — written by the evaluator alongside the outcome.
+    mfe_r: Mapped[Optional[float]] = mapped_column(Float)   # max favorable in R
+    mae_r: Mapped[Optional[float]] = mapped_column(Float)   # max adverse in R
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class UniverseSnapshot(Base):
+    """Weekly snapshot of the active research universe.
+
+    A row exists for each (date, symbol). `is_active` reflects whether the
+    symbol cleared liquidity + data-quality filters that week.
+    """
+    __tablename__ = "universe_snapshots"
+    __table_args__ = (
+        UniqueConstraint("date", "symbol", name="uq_universe_snapshots_date_symbol"),
+        Index("ix_universe_snapshots_date_active", "date", "is_active"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    name: Mapped[str] = mapped_column(String(64), default="")
+    market: Mapped[str] = mapped_column(String(8), default="TWSE")
+    sector_zh: Mapped[str] = mapped_column(String(48), default="其他")
+    sector_en: Mapped[str] = mapped_column(String(48), default="Other")
+    avg_volume_20d: Mapped[int] = mapped_column(BigInteger, default=0)
+    last_close: Mapped[float] = mapped_column(Float, default=0.0)
+    notional_twd: Mapped[float] = mapped_column(Float, default=0.0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    rank_by_notional: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class StrategyPerformanceDaily(Base):
+    """Per-strategy daily snapshot — feeds the strategy ranker."""
+    __tablename__ = "strategy_performance_daily"
+    __table_args__ = (
+        UniqueConstraint("date", "strategy", name="uq_strategy_perf_date_strategy"),
+        Index("ix_strategy_perf_strategy_date", "strategy", "date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    strategy: Mapped[str] = mapped_column(String(48), nullable=False)
+    signals_emitted: Mapped[int] = mapped_column(Integer, default=0)
+    evaluated_count: Mapped[int] = mapped_column(Integer, default=0)
+    wins: Mapped[int] = mapped_column(Integer, default=0)
+    losses: Mapped[int] = mapped_column(Integer, default=0)
+    expectancy_r: Mapped[float] = mapped_column(Float, default=0.0)
+    profit_factor: Mapped[float] = mapped_column(Float, default=0.0)
+    avg_mfe_r: Mapped[float] = mapped_column(Float, default=0.0)
+    avg_mae_r: Mapped[float] = mapped_column(Float, default=0.0)
+    decay_score: Mapped[float] = mapped_column(Float, default=0.0)  # recent vs older R
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    production_status: Mapped[str] = mapped_column(String(16), default="UNKNOWN")  # ACTIVE / DISABLED / WATCH
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

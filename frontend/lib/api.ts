@@ -247,6 +247,17 @@ export const api = {
 
   // AI Trading Research Terminal
   brief: () => request<DailyBriefResponse>("/api/v1/brief/today"),
+  narrative: () => request<any>("/api/v1/narrative/today"),
+  performanceSnapshot: (window = 30) => request<any>(`/api/v1/performance/snapshot?window=${window}`),
+  performanceBySetup: (window = 30) => request<any>(`/api/v1/performance/by-setup?window=${window}`),
+  performanceByRegime: (window = 30) => request<any>(`/api/v1/performance/by-regime?window=${window}`),
+  performanceBySector: (window = 30) => request<any>(`/api/v1/performance/by-sector?window=${window}`),
+  performanceSetupXRegime: () => request<any>("/api/v1/performance/setup-x-regime"),
+  performanceDecay: () => request<any>("/api/v1/performance/decay"),
+  strategyRank: () => request<any>("/api/v1/strategy-rank/"),
+  universeActive: () => request<any>("/api/v1/universe/active"),
+  universeSectors: () => request<any>("/api/v1/universe/sectors"),
+  researchReport: () => request<{ markdown: string }>("/api/v1/research/today"),
   intelNews: (limit = 30) => request<{ count: number; items: NewsItem[] }>(`/api/v1/intelligence/news?limit=${limit}`),
   intelSectors: () => request<{ sectors: IntelSectorRow[]; top_leaders: any[]; bottom_laggards: any[] }>(`/api/v1/intelligence/sectors`),
   intelVolumes: (minRatio = 2.0) => request<{ items: VolumeAnomaly[] }>(`/api/v1/intelligence/volume-anomalies?min_ratio=${minRatio}`),

@@ -43,6 +43,8 @@ const REGIME_TONE: Record<string, string> = {
 
 export default function TerminalPage() {
   const [brief, setBrief] = useState<DailyBriefResponse | null>(null);
+  const [narrative, setNarrative] = useState<any>(null);
+  const [strategyRank, setStrategyRank] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -50,6 +52,8 @@ export default function TerminalPage() {
     api.brief()
       .then((b) => { if (alive) setBrief(b); })
       .catch((e) => { if (alive) setError(e instanceof Error ? e.message : "load failed"); });
+    api.narrative().then((n) => alive && setNarrative(n)).catch(() => { });
+    api.strategyRank().then((r) => alive && setStrategyRank(r)).catch(() => { });
     return () => { alive = false; };
   }, []);
 
@@ -66,11 +70,17 @@ export default function TerminalPage() {
               每日自動研究 · Edge-validated 訊號 · 不展示無驗證機會
             </p>
           </div>
-          {brief && (
-            <span className="font-mono text-[10px] text-text-muted">
-              GENERATED {ts(brief.generated_at)}
-            </span>
-          )}
+          <div className="flex items-center gap-4">
+            <nav className="flex gap-3 text-[11px] font-mono uppercase tracking-widest">
+              <span className="text-accent border-b border-accent pb-0.5">Brief</span>
+              <Link href="/terminal/performance" className="text-text-muted hover:text-text">Performance</Link>
+            </nav>
+            {brief && (
+              <span className="font-mono text-[10px] text-text-muted">
+                GENERATED {ts(brief.generated_at)}
+              </span>
+            )}
+          </div>
         </header>
 
         {error && (
@@ -83,7 +93,7 @@ export default function TerminalPage() {
           <div className="font-mono text-xs text-text-muted">Loading brief…</div>
         )}
 
-        {brief && <BriefBody brief={brief} />}
+        {brief && <BriefBody brief={brief} narrative={narrative} strategyRank={strategyRank} />}
       </main>
     </div>
   );
@@ -91,9 +101,107 @@ export default function TerminalPage() {
 
 // ─────────────────────────── body ───────────────────────────────
 
-function BriefBody({ brief }: { brief: DailyBriefResponse }) {
+function BriefBody({ brief, narrative, strategyRank }: {
+  brief: DailyBriefResponse;
+  narrative: any;
+  strategyRank: any;
+}) {
   return (
     <div className="grid grid-cols-12 gap-4">
+      {/* Narrative panel — what the market is trading */}
+      {narrative && (
+        <Card className="col-span-12" icon={<Newspaper className="w-3.5 h-3.5 text-accent" />}
+              title="MARKET NARRATIVE"
+              subtitle={`style: ${narrative.market_style}`}>
+          <div className="text-sm text-text leading-relaxed">{narrative.market_summary}</div>
+          {narrative.risk_factors?.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-line">
+              <div className="text-[10px] uppercase text-text-muted mb-1.5">Risk factors</div>
+              <ul className="text-xs space-y-1">
+                {narrative.risk_factors.map((r: string, i: number) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <span className="text-down mt-0.5">⚠</span>
+                    <span className="text-text">{r}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {narrative.dominant_themes?.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-line">
+              <div className="text-[10px] uppercase text-text-muted mb-1.5">Dominant themes</div>
+              <div className="flex flex-wrap gap-1.5">
+                {narrative.dominant_themes.slice(0, 6).map((t: any) => (
+                  <Tag key={t.theme}>{t.theme} ×{t.hits}</Tag>
+                ))}
+              </div>
+            </div>
+          )}
+          {narrative.institutional_focus?.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-line">
+              <div className="text-[10px] uppercase text-text-muted mb-1.5">
+                法人聚焦 (連續買超 + 爆量)
+              </div>
+              <div className="text-xs font-mono space-y-1">
+                {narrative.institutional_focus.slice(0, 6).map((f: any) => (
+                  <div key={f.symbol} className="flex justify-between">
+                    <Link href={`/stock/${f.symbol}`} className="text-text-bright hover:text-accent">
+                      {f.symbol} {f.name}
+                    </Link>
+                    <span className="text-text-muted">
+                      外資 {f.foreign_streak}d · 投信 {f.investment_streak}d
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Strategy Rank panel */}
+      {strategyRank?.items?.length > 0 && (
+        <Card className="col-span-12" icon={<ShieldCheck className="w-3.5 h-3.5" />}
+              title="STRATEGY HEALTH"
+              subtitle={`${strategyRank.items.length} setups tracked`}>
+          <table className="w-full text-xs font-mono">
+            <thead>
+              <tr className="text-text-muted">
+                <th className="text-left py-1">SETUP</th>
+                <th className="text-right">RANK</th>
+                <th className="text-right">EXP_R</th>
+                <th className="text-right">CONSEC L</th>
+                <th className="text-right">N</th>
+                <th className="text-center">STATUS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {strategyRank.items.map((r: any) => (
+                <tr key={r.strategy} className="border-t border-line/60">
+                  <td className="py-1 text-text-bright">{r.strategy}</td>
+                  <td className="text-right text-accent">{Number(r.rank_score).toFixed(3)}</td>
+                  <td className={cn("text-right",
+                    (r.components?.live_expectancy_R ?? 0) >= 0 ? "text-up" : "text-down")}>
+                    {num(r.components?.live_expectancy_R)}
+                  </td>
+                  <td className="text-right">{r.components?.max_consec_loss ?? 0}</td>
+                  <td className="text-right text-text-muted">{r.components?.sample_size ?? 0}</td>
+                  <td className="text-center">
+                    <span className={cn(
+                      "inline-block px-1.5 py-0.5 rounded text-[10px] border",
+                      r.production_status === "ACTIVE" ? "text-up border-up/40 bg-up/10"
+                      : r.production_status === "WATCH" ? "text-amber-400 border-amber-400/40 bg-amber-400/10"
+                      : r.production_status === "DISABLED" ? "text-down border-down/40 bg-down/10"
+                      : "text-text-muted border-line bg-bg-elevated/40",
+                    )}>{r.production_status}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
       {/* row 1 — market regime */}
       <Card className="col-span-12 lg:col-span-4" icon={<Activity className="w-3.5 h-3.5" />}
             title="MARKET REGIME" subtitle={`proxy ${brief.market_regime.proxy ?? "—"}`}>

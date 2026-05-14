@@ -80,9 +80,9 @@ async def job_persist_signals() -> None:
 
 
 async def job_evaluate_signals() -> None:
-    """09:00 — walk forward through any unevaluated signals at least
-    EVAL_HORIZON_BARS days old and mark TP/SL/timeout outcomes."""
-    log.info("[scheduler] 09:00 evaluate_signals")
+    """16:00 — walk forward through any unevaluated signals at least
+    EVAL_HORIZON_BARS days old and mark TP/SL/timeout outcomes (+ MFE/MAE)."""
+    log.info("[scheduler] evaluate_signals")
     try:
         from app.services.edge_tracking_service import evaluate_open_signals
         async with async_session_maker() as s:
@@ -90,6 +90,78 @@ async def job_evaluate_signals() -> None:
         log.info("evaluate_signals: %s", res)
     except Exception as e:
         log.exception("evaluate_signals failed: %s", e)
+
+
+async def job_strategy_ranking_refresh() -> None:
+    """17:00 — recompute strategy ranks + persist daily snapshot."""
+    log.info("[scheduler] 17:00 strategy_ranking_refresh")
+    try:
+        from datetime import date as _date
+        from app.db.models import StrategyPerformanceDaily
+        from app.strategy_registry.ranker import rank_all
+        from app.edge import strategy_metrics
+        from sqlalchemy import select as _sel
+
+        async with async_session_maker() as s:
+            rankings = await rank_all(s)
+            stats = await strategy_metrics.by_setup(s, window_days=30)
+            today_ = _date.today()
+            for r in rankings:
+                st = stats.get(r.strategy, {})
+                existing = (await s.execute(
+                    _sel(StrategyPerformanceDaily).where(
+                        StrategyPerformanceDaily.date == today_,
+                        StrategyPerformanceDaily.strategy == r.strategy,
+                    )
+                )).scalar_one_or_none()
+                fields = dict(
+                    signals_emitted=0,
+                    evaluated_count=st.get("sample_size", 0),
+                    wins=int(st.get("sample_size", 0) * st.get("win_rate", 0)),
+                    losses=int(st.get("sample_size", 0) * (1 - st.get("win_rate", 0))),
+                    expectancy_r=st.get("expectancy_R", 0.0),
+                    profit_factor=st.get("profit_factor", 0.0),
+                    avg_mfe_r=st.get("avg_mfe_R", 0.0),
+                    avg_mae_r=st.get("avg_mae_R", 0.0),
+                    decay_score=r.components.get("decay", 0.0),
+                    is_active=r.production_status == "ACTIVE",
+                    production_status=r.production_status,
+                )
+                if existing:
+                    for k, v in fields.items():
+                        setattr(existing, k, v)
+                else:
+                    s.add(StrategyPerformanceDaily(
+                        date=today_, strategy=r.strategy, **fields,
+                    ))
+            await s.commit()
+        log.info("ranking refresh: %d rows", len(rankings))
+    except Exception as e:
+        log.exception("strategy_ranking_refresh failed: %s", e)
+
+
+async def job_universe_rebuild() -> None:
+    """Sun 23:00 — rebuild universe snapshot from latest DailyPrice."""
+    log.info("[scheduler] universe_rebuild")
+    try:
+        from app.universe.universe_builder import build_snapshot
+        async with async_session_maker() as s:
+            report = await build_snapshot(s)
+        log.info("universe_rebuild: %s", report)
+    except Exception as e:
+        log.exception("universe_rebuild failed: %s", e)
+
+
+async def job_daily_report() -> None:
+    """18:00 — pre-render the research report so cache is warm."""
+    log.info("[scheduler] 18:00 daily_report")
+    try:
+        from app.services.research_report import render_markdown
+        async with async_session_maker() as s:
+            _ = await render_markdown(s)
+        log.info("daily_report rendered")
+    except Exception as e:
+        log.exception("daily_report failed: %s", e)
 
 
 async def _push(kind: str, min_plan: str = "elite") -> None:
@@ -121,15 +193,18 @@ def start() -> AsyncIOScheduler:
         return _scheduler
     s = get_settings()
     sched = AsyncIOScheduler(timezone=s.scheduler_timezone)
-    sched.add_job(job_update_data,        CronTrigger(day_of_week="mon-fri", hour=8,  minute=50, timezone=s.scheduler_timezone), id="update_data")
-    sched.add_job(job_evaluate_signals,   CronTrigger(day_of_week="mon-fri", hour=9,  minute=0,  timezone=s.scheduler_timezone), id="evaluate_signals")
-    sched.add_job(job_send_open,          CronTrigger(day_of_week="mon-fri", hour=9,  minute=5,  timezone=s.scheduler_timezone), id="send_open")
-    sched.add_job(job_send_intraday,      CronTrigger(day_of_week="mon-fri", hour=13, minute=25, timezone=s.scheduler_timezone), id="send_intraday")
-    sched.add_job(job_ingest_daily,       CronTrigger(day_of_week="mon-fri", hour=15, minute=10, timezone=s.scheduler_timezone), id="ingest_daily")
-    sched.add_job(job_run_scoring,        CronTrigger(day_of_week="mon-fri", hour=15, minute=20, timezone=s.scheduler_timezone), id="run_scoring")
-    sched.add_job(job_refresh_trade_plans,CronTrigger(day_of_week="mon-fri", hour=15, minute=25, timezone=s.scheduler_timezone), id="refresh_trade_plans")
-    sched.add_job(job_send_close,         CronTrigger(day_of_week="mon-fri", hour=15, minute=30, timezone=s.scheduler_timezone), id="send_close")
-    sched.add_job(job_persist_signals,    CronTrigger(day_of_week="mon-fri", hour=15, minute=35, timezone=s.scheduler_timezone), id="persist_signals")
+    sched.add_job(job_update_data,             CronTrigger(day_of_week="mon-fri", hour=8,  minute=50, timezone=s.scheduler_timezone), id="update_data")
+    sched.add_job(job_send_open,               CronTrigger(day_of_week="mon-fri", hour=9,  minute=5,  timezone=s.scheduler_timezone), id="send_open")
+    sched.add_job(job_send_intraday,           CronTrigger(day_of_week="mon-fri", hour=13, minute=25, timezone=s.scheduler_timezone), id="send_intraday")
+    sched.add_job(job_ingest_daily,            CronTrigger(day_of_week="mon-fri", hour=15, minute=10, timezone=s.scheduler_timezone), id="ingest_daily")
+    sched.add_job(job_run_scoring,             CronTrigger(day_of_week="mon-fri", hour=15, minute=20, timezone=s.scheduler_timezone), id="run_scoring")
+    sched.add_job(job_refresh_trade_plans,     CronTrigger(day_of_week="mon-fri", hour=15, minute=25, timezone=s.scheduler_timezone), id="refresh_trade_plans")
+    sched.add_job(job_send_close,              CronTrigger(day_of_week="mon-fri", hour=15, minute=30, timezone=s.scheduler_timezone), id="send_close")
+    sched.add_job(job_persist_signals,         CronTrigger(day_of_week="mon-fri", hour=15, minute=35, timezone=s.scheduler_timezone), id="persist_signals")
+    sched.add_job(job_evaluate_signals,        CronTrigger(day_of_week="mon-fri", hour=16, minute=0,  timezone=s.scheduler_timezone), id="evaluate_signals")
+    sched.add_job(job_strategy_ranking_refresh,CronTrigger(day_of_week="mon-fri", hour=17, minute=0,  timezone=s.scheduler_timezone), id="strategy_ranking_refresh")
+    sched.add_job(job_daily_report,            CronTrigger(day_of_week="mon-fri", hour=18, minute=0,  timezone=s.scheduler_timezone), id="daily_report")
+    sched.add_job(job_universe_rebuild,        CronTrigger(day_of_week="sun",     hour=23, minute=0,  timezone=s.scheduler_timezone), id="universe_rebuild")
     sched.start()
     _scheduler = sched
     log.info("APScheduler started in %s with %d jobs", s.scheduler_timezone, len(sched.get_jobs()))
