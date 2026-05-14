@@ -8,8 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ChipData, DailyPrice, Stock
 from app.db.session import get_db
+from app.services.breadth_service import compute_breadth
+from app.services.cache_service import cached
 
 router = APIRouter()
+
+
+@router.get("/breadth")
+async def market_breadth(session: AsyncSession = Depends(get_db)) -> dict:
+    """Market-wide participation snapshot: adv/dec, %>MA, new highs/lows,
+    sector heatmap, leaders/laggards. The trader's regime instrument."""
+    return await cached("market:breadth", lambda: compute_breadth(session), ttl=180)
 
 
 class MarketSummary(BaseModel):

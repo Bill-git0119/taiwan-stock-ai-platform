@@ -51,6 +51,7 @@ class TradePlan:
     chip_score: float = 0.0
     technical_score: float = 0.0
     fundamental_score: float = 0.0
+    fundamental_available: bool = False
     reasons: List[str] = field(default_factory=list)
     indicators: dict = field(default_factory=dict)
     chip: dict = field(default_factory=dict)
@@ -92,8 +93,15 @@ def _chip_score(cb: ChipBundle) -> float:
     return max(0.0, min(100.0, fs + inv + vol_pts + conc_pts + align_pts))
 
 
-def _confidence(chip: float, tech: float, fund: float) -> float:
-    raw = chip * 0.40 + fund * 0.35 + tech * 0.25
+def _confidence(chip: float, tech: float, fund: Optional[float]) -> float:
+    # When fundamentals aren't wired we *must not* give every stock a free +50.
+    # Re-normalise to the available signals so confidence reflects what we
+    # actually measured, not a placeholder.
+    if fund is None:
+        # chip + tech only — original weights 0.40 / 0.25, renormalised
+        raw = chip * (0.40 / 0.65) + tech * (0.25 / 0.65)
+    else:
+        raw = chip * 0.40 + fund * 0.35 + tech * 0.25
     return max(0.0, min(1.0, raw / 100.0))
 
 
@@ -136,7 +144,7 @@ def build_plan(
     lows: Optional[Sequence[float]] = None,
     volumes: Optional[Sequence[float]] = None,
     chip_records: Optional[Sequence[dict]] = None,
-    fundamental_score: float = 50.0,
+    fundamental_score: Optional[float] = None,
     account_size: Optional[float] = None,
 ) -> TradePlan:
     """Compute a full trade plan or NO_TRADE with reason."""
@@ -163,9 +171,10 @@ def build_plan(
     plan.chip = cb.to_dict()
     plan.technical_score = _round(_technical_score(ind), 2) or 0.0
     plan.chip_score = _round(_chip_score(cb), 2) or 0.0
-    plan.fundamental_score = float(fundamental_score)
+    plan.fundamental_score = float(fundamental_score) if fundamental_score is not None else 0.0
+    plan.fundamental_available = fundamental_score is not None
     plan.confidence = _round(
-        _confidence(plan.chip_score, plan.technical_score, plan.fundamental_score), 4,
+        _confidence(plan.chip_score, plan.technical_score, fundamental_score), 4,
     ) or 0.0
 
     # Market regime gate (Iron rule: only trade setups appropriate to regime)

@@ -111,11 +111,14 @@ async def get_trade_plan(
             lows=[b["low"] for b in bars],
             volumes=[b["volume"] for b in bars],
             chip_records=chip_records,
-            fundamental_score=60.0,  # TODO: hook MOPS fundamentals here
+            # Honest signal — no synthetic fundamentals (re-weighted internally).
+            fundamental_score=None,
             account_size=account_size,
         )
         out = plan.to_dict()
         out["data_source"] = "real"
+        # Data freshness — last bar date used to build the plan
+        out["as_of"] = bars[-1].get("date") if bars else None
         return out
 
     return await cached(cache_key, loader, ttl=120)

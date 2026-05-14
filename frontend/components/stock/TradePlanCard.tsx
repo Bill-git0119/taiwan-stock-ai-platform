@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Target, Shield, TrendingUp, AlertTriangle, Database, AlertCircle,
-  Activity, ShieldCheck,
+  Activity, ShieldCheck, Calculator, Info,
 } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { api, type TradePlanResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
+
+const ACCOUNT_KEY = "tsa_account_size";
+const RISK_KEY = "tsa_risk_pct";
 
 const SETUP_LABEL: Record<string, string> = {
   trend_breakout_retest: "突破回踩",
@@ -92,7 +95,16 @@ export function TradePlanCard({ symbol }: { symbol: string }) {
     <Card>
       <CardHeader
         title="交易計畫"
-        subtitle={`${plan.symbol} · ${SETUP_LABEL[plan.setup ?? ""] ?? plan.setup}`}
+        subtitle={
+          <span>
+            {plan.symbol} · {SETUP_LABEL[plan.setup ?? ""] ?? plan.setup}
+            {plan.as_of && (
+              <span className="ml-2 text-text-muted">
+                · 資料日 <span className="font-mono">{plan.as_of}</span>
+              </span>
+            )}
+          </span>
+        }
         right={
           <div className="flex items-center gap-2">
             <DataSourceBadge source={plan.data_source} />
@@ -132,6 +144,22 @@ export function TradePlanCard({ symbol }: { symbol: string }) {
                } />
           <KPI label="ATR (14)" value={plan.atr ? plan.atr.toFixed(2) : "—"} tone="muted" />
         </div>
+
+        <PositionSizer
+          entry={entryLo}
+          stopLoss={sl}
+          takeProfitR1={tp1}
+        />
+
+        {plan.fundamental_available === false && (
+          <div className="rounded-md border border-amber-400/30 bg-amber-400/5 p-3 flex items-start gap-2">
+            <Info className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
+            <div className="text-[11px] text-text-muted leading-relaxed">
+              <span className="text-amber-300 font-medium">基本面資料未接入</span>
+              ：信心分數已自動以「籌碼 + 技術」重新加權（不再給每檔股票自動 +50 假分）。
+            </div>
+          </div>
+        )}
 
         {plan.reasons.length > 0 && (
           <div>
@@ -296,6 +324,153 @@ function Tile({ icon, label, value, tone }: { icon: React.ReactNode; label: stri
       <div className={cn("mt-1 font-mono text-lg font-semibold", tone)}>{value}</div>
     </div>
   );
+}
+
+function PositionSizer({ entry, stopLoss, takeProfitR1 }:
+  { entry: number; stopLoss: number; takeProfitR1: number }) {
+  // Hydrate from localStorage; defaults aimed at a typical retail TW trader.
+  const [account, setAccount] = useState<number>(500000);
+  const [riskPct, setRiskPct] = useState<number>(1);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    try {
+      const a = Number(window.localStorage.getItem(ACCOUNT_KEY));
+      const r = Number(window.localStorage.getItem(RISK_KEY));
+      if (Number.isFinite(a) && a > 0) setAccount(a);
+      if (Number.isFinite(r) && r > 0) setRiskPct(r);
+    } catch {}
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      window.localStorage.setItem(ACCOUNT_KEY, String(account));
+      window.localStorage.setItem(RISK_KEY, String(riskPct));
+    } catch {}
+  }, [account, riskPct, hydrated]);
+
+  const calc = useMemo(() => {
+    const riskPerShare = Math.max(0, entry - stopLoss);
+    if (riskPerShare <= 0 || account <= 0 || riskPct <= 0) return null;
+    const maxRiskTwd = account * (riskPct / 100);
+    // TW market trades in lots of 1000; round down to the nearest lot.
+    const sharesRaw = Math.floor(maxRiskTwd / riskPerShare);
+    const lots = Math.floor(sharesRaw / 1000);
+    const shares = lots * 1000;
+    const odd = sharesRaw - shares;
+    const notional = shares * entry;
+    const exposurePct = (notional / account) * 100;
+    const expectedProfitR1 = shares * (takeProfitR1 - entry);
+    return {
+      riskPerShare,
+      maxRiskTwd,
+      shares,
+      lots,
+      odd,
+      notional,
+      exposurePct,
+      expectedProfitR1,
+    };
+  }, [entry, stopLoss, takeProfitR1, account, riskPct]);
+
+  return (
+    <div className="rounded-md border border-accent/30 bg-accent/5 p-3">
+      <div className="flex items-center gap-2 mb-2.5">
+        <Calculator className="w-3.5 h-3.5 text-accent" />
+        <span className="text-[10px] uppercase tracking-widest text-text-bright">
+          倉位試算（鐵律：單筆風險 ≤ 1%）
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        <label className="block">
+          <div className="text-[10px] text-text-muted mb-1">帳戶資金 (TWD)</div>
+          <input
+            type="number"
+            inputMode="numeric"
+            value={account}
+            min={10000}
+            step={10000}
+            onChange={(e) => setAccount(Math.max(0, Number(e.target.value)))}
+            className="w-full px-2 py-1.5 text-sm font-mono bg-bg-elevated border border-line rounded
+                       text-text-bright focus:border-accent outline-none"
+          />
+        </label>
+        <label className="block">
+          <div className="text-[10px] text-text-muted mb-1">單筆風險 %（建議 0.5–1）</div>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={riskPct}
+            min={0.1}
+            max={2}
+            step={0.1}
+            onChange={(e) => setRiskPct(Math.max(0, Math.min(2, Number(e.target.value))))}
+            className={cn(
+              "w-full px-2 py-1.5 text-sm font-mono bg-bg-elevated border rounded",
+              "text-text-bright focus:border-accent outline-none",
+              riskPct > 1 ? "border-amber-400/60" : "border-line",
+            )}
+          />
+        </label>
+      </div>
+      {calc ? (
+        <div className="grid grid-cols-4 gap-2 text-xs font-mono">
+          <div>
+            <div className="text-[10px] text-text-muted">建議張數</div>
+            <div className="text-text-bright text-lg font-semibold">{calc.lots}</div>
+            {calc.odd > 0 && (
+              <div className="text-[9px] text-text-muted">+ {calc.odd} 股零股</div>
+            )}
+          </div>
+          <div>
+            <div className="text-[10px] text-text-muted">總部位</div>
+            <div className="text-text-bright">{fmt(calc.notional)}</div>
+            <div className={cn(
+              "text-[9px]",
+              calc.exposurePct > 30 ? "text-down" : "text-text-muted",
+            )}>
+              佔資金 {calc.exposurePct.toFixed(1)}%
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] text-text-muted">最大可承受虧損</div>
+            <div className="text-down">−{fmt(calc.maxRiskTwd)}</div>
+            <div className="text-[9px] text-text-muted">
+              每股 −{calc.riskPerShare.toFixed(2)}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] text-text-muted">TP1 預期利潤</div>
+            <div className="text-up">+{fmt(calc.expectedProfitR1)}</div>
+            <div className="text-[9px] text-text-muted">
+              {calc.shares > 0 ? `${calc.shares} 股` : "—"}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="text-xs text-text-muted">輸入帳戶資金以計算</div>
+      )}
+      {calc && calc.shares === 0 && (
+        <div className="mt-2 text-[10px] text-amber-300">
+          ⚠ 在此風險預算下不足以買滿一張（1000 股）。可考慮提高帳戶資金或改買零股。
+        </div>
+      )}
+      {calc && calc.exposurePct > 30 && (
+        <div className="mt-2 text-[10px] text-amber-300">
+          ⚠ 單一部位曝險超過 30%，集中度過高。
+        </div>
+      )}
+    </div>
+  );
+}
+
+function fmt(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  if (n >= 1e8) return `${(n / 1e8).toFixed(2)} 億`;
+  if (n >= 1e4) return `${(n / 1e4).toFixed(1)} 萬`;
+  return n.toFixed(0);
 }
 
 function KPI({ label, value, tone = "muted", extra }: {

@@ -9,6 +9,7 @@ import { RecentTrend } from "@/components/stock/RecentTrend";
 import { ScoreBreakdown } from "@/components/stock/ScoreBreakdown";
 import { TradingViewChart } from "@/components/stock/TradingViewChart";
 import { TradePlanCard } from "@/components/stock/TradePlanCard";
+import { WatchlistToggle } from "@/components/stock/WatchlistToggle";
 
 async function loadStock(symbol: string): Promise<StockDetail | null> {
   try {
@@ -50,6 +51,12 @@ export default async function StockPage({
             <span className="text-[11px] text-text-muted uppercase tracking-widest border border-line rounded px-1.5 py-0.5">
               {detail.market}
             </span>
+            {detail.sector && (
+              <span className="text-[11px] text-text-muted border border-line rounded px-1.5 py-0.5">
+                {detail.sector}
+              </span>
+            )}
+            <WatchlistToggle symbol={detail.symbol} />
           </div>
         </div>
 

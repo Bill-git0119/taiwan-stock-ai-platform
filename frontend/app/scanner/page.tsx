@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Filter, Flame, RefreshCw, Sparkles, TrendingUp, Zap } from "lucide-react";
+import { Filter, Flame, RefreshCw, Sparkles, TrendingUp, Zap, Star } from "lucide-react";
 
 import { Topbar } from "@/components/layout/Topbar";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { api, type ScanItem, type ScanResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useWatchlist } from "@/lib/watchlist";
 
 const SETUP_LABEL: Record<string, string> = {
   trend_breakout_retest: "突破回踩",
@@ -32,6 +33,8 @@ export default function ScannerPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [watchOnly, setWatchOnly] = useState(false);
+  const wl = useWatchlist();
 
   useEffect(() => {
     let alive = true;
@@ -51,8 +54,27 @@ export default function ScannerPage() {
     return () => { alive = false; };
   }, [mode, setup, refreshTick]);
 
-  const items = data?.items ?? [];
+  const rawItems = data?.items ?? [];
+  const items = useMemo(
+    () => (watchOnly ? rawItems.filter((i) => wl.has(i.symbol)) : rawItems),
+    [rawItems, watchOnly, wl],
+  );
   const longCount = useMemo(() => items.filter((i) => i.bias === "LONG").length, [items]);
+
+  // Top-10 LONG sector concentration — flag if a single sector dominates.
+  const concentration = useMemo(() => {
+    const longs = items.filter((i) => i.bias === "LONG").slice(0, 10);
+    if (longs.length < 5) return null;
+    const buckets: Record<string, number> = {};
+    for (const it of longs) {
+      const s = it.sector || "其他";
+      buckets[s] = (buckets[s] || 0) + 1;
+    }
+    const sorted = Object.entries(buckets).sort((a, b) => b[1] - a[1]);
+    const [topSec, topCount] = sorted[0];
+    const pct = (topCount / longs.length) * 100;
+    return { topSec, topCount, pct: Math.round(pct), total: longs.length, distribution: sorted };
+  }, [items]);
 
   return (
     <div className="min-h-screen">
@@ -97,6 +119,19 @@ export default function ScannerPage() {
               ))}
             </div>
             <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={() => setWatchOnly((v) => !v)}
+                title={`Watchlist: ${wl.symbols.length} 檔`}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border transition-colors",
+                  watchOnly
+                    ? "bg-amber-400/15 text-amber-300 border-amber-400/40"
+                    : "bg-bg-elevated text-text-muted border-line hover:text-text-bright",
+                )}
+              >
+                <Star className={cn("w-3.5 h-3.5", watchOnly && "fill-amber-300")} />
+                Watchlist{wl.symbols.length > 0 && ` (${wl.symbols.length})`}
+              </button>
               <select
                 value={setup}
                 onChange={(e) => setSetup(e.target.value)}
@@ -117,9 +152,51 @@ export default function ScannerPage() {
               <span>命中 <span className="text-up font-mono font-semibold">{data.matched}</span> 檔</span>
               <span>·</span>
               <span>LONG: <span className="text-up font-mono">{longCount}</span></span>
+              {data.as_of && (
+                <>
+                  <span>·</span>
+                  <span>資料日 <span className="text-text-bright font-mono">{data.as_of}</span></span>
+                </>
+              )}
+              {data.market_context && (
+                <>
+                  <span>·</span>
+                  <span>市場 5D <span className={cn(
+                    "font-mono",
+                    data.market_context.market_5d >= 0 ? "text-up" : "text-down",
+                  )}>
+                    {data.market_context.market_5d >= 0 ? "+" : ""}{data.market_context.market_5d.toFixed(2)}%
+                  </span></span>
+                </>
+              )}
             </div>
           )}
         </Card>
+
+        {/* Sector concentration warning — top-10 LONG distribution */}
+        {concentration && (
+          <Card className={cn(
+            "p-3 text-xs flex items-center gap-3",
+            concentration.pct >= 50 ? "border-amber-400/40 bg-amber-400/5" : "",
+          )}>
+            <Flame className={cn(
+              "w-4 h-4",
+              concentration.pct >= 50 ? "text-amber-300" : "text-text-muted",
+            )} />
+            <div className="flex-1">
+              <div className="text-text-bright">
+                Top-10 LONG 族群分布：
+                <span className={cn("ml-2 mono", concentration.pct >= 50 ? "text-amber-300" : "text-text-muted")}>
+                  {concentration.topSec} {concentration.pct}% ({concentration.topCount}/{concentration.total})
+                </span>
+              </div>
+              <div className="text-[10px] text-text-muted mt-0.5">
+                {concentration.distribution.slice(0, 5).map(([s, c]) => `${s}×${c}`).join(" · ")}
+                {concentration.pct >= 50 && " · ⚠ 集中度過高，建議跨族群分散"}
+              </div>
+            </div>
+          </Card>
+        )}
 
         {/* Results */}
         <Card>
@@ -156,6 +233,7 @@ export default function ScannerPage() {
                 <thead className="text-[11px] uppercase tracking-wider text-text-muted bg-bg-elevated/40">
                   <tr>
                     <th className="text-left  font-medium px-4 py-2.5">#</th>
+                    <th className="w-6"></th>
                     <th className="text-left  font-medium py-2.5">代號 / 名稱</th>
                     <th className="text-left  font-medium py-2.5">Bias</th>
                     <th className="text-left  font-medium py-2.5">Setup</th>
@@ -164,7 +242,8 @@ export default function ScannerPage() {
                     <th className="text-right font-medium py-2.5">停損</th>
                     <th className="text-right font-medium py-2.5">TP1 / TP2</th>
                     <th className="text-right font-medium py-2.5">RR</th>
-                    <th className="text-right font-medium py-2.5">RSI</th>
+                    <th className="text-right font-medium py-2.5" title="5日相對大盤強度 (本檔 5D% − 等權市場 5D%)">RS 5D</th>
+                    <th className="text-left  font-medium py-2.5">族群</th>
                     <th className="text-right font-medium py-2.5">Vol×</th>
                     <th className="text-right font-medium py-2.5">信心</th>
                     <th className="text-right font-medium px-4 py-2.5">Edge</th>
@@ -194,10 +273,21 @@ function ScanRow({ item, rank }: { item: ScanItem; rank: number }) {
   const ind = item.indicators ?? {};
   const rsi = ind.rsi14 as number | undefined;
   const vol = ind.volume_spike as number | undefined;
+  const wl = useWatchlist();
+  const starred = wl.has(item.symbol);
 
   return (
     <tr className="border-t border-line hover:bg-bg-elevated/60 transition-colors group">
       <td className="px-4 py-3 mono text-text-muted">{String(rank).padStart(2, "0")}</td>
+      <td className="py-3">
+        <button
+          onClick={() => wl.toggle(item.symbol)}
+          title={starred ? "從 watchlist 移除" : "加入 watchlist"}
+          className="text-text-muted hover:text-amber-300 transition-colors"
+        >
+          <Star className={cn("w-4 h-4", starred && "fill-amber-300 text-amber-300")} />
+        </button>
+      </td>
       <td className="py-3">
         <Link href={`/stock/${item.symbol}`} className="block group-hover:text-accent">
           <div className="flex items-baseline gap-2">
@@ -238,13 +328,34 @@ function ScanRow({ item, rank }: { item: ScanItem; rank: number }) {
       )}>
         {item.risk_reward ? `${item.risk_reward.toFixed(2)}` : "—"}
       </td>
-      <td className="py-3 text-right mono text-xs text-text-muted">
-        {rsi != null ? rsi.toFixed(0) : "—"}
+      <td className={cn(
+        "py-3 text-right mono text-xs font-semibold",
+        (item.rs_5d ?? 0) >= 2 ? "text-up"
+          : (item.rs_5d ?? 0) <= -2 ? "text-down"
+          : "text-text-muted",
+      )} title={`5D 報酬 ${item.ret_5d?.toFixed(2)}% 對比市場`}>
+        {item.rs_5d != null ? `${item.rs_5d >= 0 ? "+" : ""}${item.rs_5d.toFixed(1)}` : "—"}
+      </td>
+      <td className="py-3 text-xs">
+        {item.sector ? (
+          <div className="flex items-center gap-1.5">
+            <span className={cn(
+              "px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider border",
+              item.sector_rank && item.sector_count
+                && item.sector_rank <= Math.max(1, Math.floor(item.sector_count / 3))
+                  ? "text-up border-up/40 bg-up/10"
+                  : "text-text-muted border-line",
+            )}>
+              #{item.sector_rank ?? "—"}/{item.sector_count ?? "—"}
+            </span>
+            <span className="text-text-muted truncate max-w-[7em]" title={item.sector}>{item.sector}</span>
+          </div>
+        ) : "—"}
       </td>
       <td className={cn(
         "py-3 text-right mono text-xs",
         vol && vol >= 1.5 ? "text-up font-semibold" : "text-text-muted",
-      )}>
+      )} title={rsi != null ? `RSI ${rsi.toFixed(0)}` : undefined}>
         {vol != null ? `${vol.toFixed(1)}×` : "—"}
       </td>
       <td className="py-3 text-right">

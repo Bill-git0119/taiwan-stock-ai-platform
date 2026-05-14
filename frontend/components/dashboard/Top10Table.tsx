@@ -40,11 +40,18 @@ export function Top10Table() {
         title="每日 TOP 10 強勢股"
         subtitle="Score = Chip 40% + Fundamental 35% + Technical 25%"
         right={
-          tier ? (
-            <span className="mono text-[11px] text-text-muted">
-              {PLAN_LABEL[tier.plan]} · {tier.showing} / {tier.total_available}
-            </span>
-          ) : null
+          <div className="flex items-center gap-3">
+            {scan?.as_of && (
+              <span className="mono text-[10px] text-text-muted">
+                資料日 <span className="text-text-bright">{scan.as_of}</span>
+              </span>
+            )}
+            {tier && (
+              <span className="mono text-[11px] text-text-muted">
+                {PLAN_LABEL[tier.plan]} · {tier.showing} / {tier.total_available}
+              </span>
+            )}
+          </div>
         }
       />
 

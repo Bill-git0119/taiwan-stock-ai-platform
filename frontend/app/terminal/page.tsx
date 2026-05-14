@@ -8,8 +8,16 @@ import {
 } from "lucide-react";
 
 import { Topbar } from "@/components/layout/Topbar";
-import { api, type DailyBriefResponse, type ScanItem, type IntelSectorRow } from "@/lib/api";
+import { api, type DailyBriefResponse, type ScanItem, type IntelSectorRow, type MarketBreadth } from "@/lib/api";
 import { cn } from "@/lib/utils";
+
+const BREADTH_HINT: Record<MarketBreadth["regime_hint"], { label: string; tone: string }> = {
+  broad_strength: { label: "廣度強勢", tone: "text-up border-up/40 bg-up/10" },
+  broad_weakness: { label: "廣度弱勢", tone: "text-down border-down/40 bg-down/10" },
+  consolidation: { label: "整理中", tone: "text-text-muted border-line bg-bg-elevated/40" },
+  mixed: { label: "分歧", tone: "text-amber-400 border-amber-400/40 bg-amber-400/10" },
+  no_data: { label: "資料不足", tone: "text-text-muted border-line bg-bg-elevated/40" },
+};
 
 // ─────────────────────────── helpers ────────────────────────────
 
@@ -45,6 +53,7 @@ export default function TerminalPage() {
   const [brief, setBrief] = useState<DailyBriefResponse | null>(null);
   const [narrative, setNarrative] = useState<any>(null);
   const [strategyRank, setStrategyRank] = useState<any>(null);
+  const [breadth, setBreadth] = useState<MarketBreadth | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -54,6 +63,7 @@ export default function TerminalPage() {
       .catch((e) => { if (alive) setError(e instanceof Error ? e.message : "load failed"); });
     api.narrative().then((n) => alive && setNarrative(n)).catch(() => { });
     api.strategyRank().then((r) => alive && setStrategyRank(r)).catch(() => { });
+    api.marketBreadth().then((b) => alive && setBreadth(b)).catch(() => { });
     return () => { alive = false; };
   }, []);
 
@@ -94,7 +104,7 @@ export default function TerminalPage() {
           <div className="font-mono text-xs text-text-muted">Loading brief…</div>
         )}
 
-        {brief && <BriefBody brief={brief} narrative={narrative} strategyRank={strategyRank} />}
+        {brief && <BriefBody brief={brief} narrative={narrative} strategyRank={strategyRank} breadth={breadth} />}
       </main>
     </div>
   );
@@ -102,13 +112,19 @@ export default function TerminalPage() {
 
 // ─────────────────────────── body ───────────────────────────────
 
-function BriefBody({ brief, narrative, strategyRank }: {
+function BriefBody({ brief, narrative, strategyRank, breadth }: {
   brief: DailyBriefResponse;
   narrative: any;
   strategyRank: any;
+  breadth: MarketBreadth | null;
 }) {
   return (
     <div className="grid grid-cols-12 gap-4">
+      {/* Market Breadth — participation snapshot */}
+      {breadth && breadth.universe_size > 0 && (
+        <BreadthCard breadth={breadth} />
+      )}
+
       {/* Narrative panel — what the market is trading */}
       {narrative && (
         <Card className="col-span-12" icon={<Newspaper className="w-3.5 h-3.5 text-accent" />}
@@ -535,5 +551,145 @@ function SignalTable({ rows, validated }: { rows: ScanItem[]; validated: boolean
         ))}
       </tbody>
     </table>
+  );
+}
+
+// ───────────────────────── Market Breadth ──────────────────────────
+
+function BreadthCard({ breadth }: { breadth: MarketBreadth }) {
+  const hint = BREADTH_HINT[breadth.regime_hint];
+  const adv = breadth.advance_decline;
+  const advPct = breadth.universe_size > 0
+    ? (adv.advancing / breadth.universe_size) * 100 : 0;
+  const newHigh = breadth.new_highs_20;
+  const newLow = breadth.new_lows_20;
+  const netNH = newHigh - newLow;
+
+  return (
+    <Card className="col-span-12" icon={<Activity className="w-3.5 h-3.5 text-accent" />}
+          title="MARKET BREADTH"
+          subtitle={`${breadth.universe_size} 檔追蹤宇宙 · ${breadth.as_of ?? "—"}`}>
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-3">
+        <Stat label="廣度判讀" value={
+          <span className={cn(
+            "inline-block px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider border",
+            hint.tone,
+          )}>{hint.label}</span>
+        } />
+        <Stat label="Adv / Dec"
+              value={
+                <span className="font-mono">
+                  <span className="text-up">{adv.advancing}</span>
+                  <span className="text-text-muted"> / </span>
+                  <span className="text-down">{adv.declining}</span>
+                </span>
+              }
+              extra={
+                <span className={cn(
+                  "text-[9px] font-mono",
+                  adv.ratio >= 2 ? "text-up" : adv.ratio <= 0.5 ? "text-down" : "text-text-muted",
+                )}>ratio {adv.ratio.toFixed(2)}</span>
+              } />
+        <Stat label="% &gt; MA20"
+              value={<span className={cn("font-mono",
+                breadth.above_ma20_pct >= 60 ? "text-up"
+                : breadth.above_ma20_pct <= 40 ? "text-down"
+                : "text-text-bright")}>
+                {breadth.above_ma20_pct.toFixed(0)}%
+              </span>} />
+        <Stat label="% &gt; MA50"
+              value={<span className={cn("font-mono",
+                breadth.above_ma50_pct >= 60 ? "text-up"
+                : breadth.above_ma50_pct <= 40 ? "text-down"
+                : "text-text-bright")}>
+                {breadth.above_ma50_pct.toFixed(0)}%
+              </span>} />
+        <Stat label="20D 新高 / 新低"
+              value={
+                <span className="font-mono">
+                  <span className="text-up">{newHigh}</span>
+                  <span className="text-text-muted"> / </span>
+                  <span className="text-down">{newLow}</span>
+                </span>
+              }
+              extra={
+                <span className={cn(
+                  "text-[9px] font-mono",
+                  netNH > 0 ? "text-up" : netNH < 0 ? "text-down" : "text-text-muted",
+                )}>net {netNH >= 0 ? "+" : ""}{netNH}</span>
+              } />
+        <Stat label="60D 新高 / 新低"
+              value={
+                <span className="font-mono">
+                  <span className="text-up">{breadth.new_highs_60}</span>
+                  <span className="text-text-muted"> / </span>
+                  <span className="text-down">{breadth.new_lows_60}</span>
+                </span>
+              } />
+      </div>
+
+      {breadth.sectors.length > 0 && (
+        <div className="pt-3 border-t border-line">
+          <div className="text-[10px] uppercase text-text-muted mb-2">族群 5D 強弱（heatmap）</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-1.5">
+            {breadth.sectors.map((s) => (
+              <div key={s.sector}
+                   className={cn(
+                     "rounded px-2 py-1.5 text-xs flex items-center justify-between border",
+                     s.ret_5d >= 3 ? "bg-up/15 border-up/40 text-up"
+                     : s.ret_5d >= 1 ? "bg-up/8 border-up/25 text-up/90"
+                     : s.ret_5d > -1 ? "bg-bg-elevated/40 border-line text-text-muted"
+                     : s.ret_5d > -3 ? "bg-down/8 border-down/25 text-down/90"
+                     : "bg-down/15 border-down/40 text-down",
+                   )}>
+                <span className="truncate" title={`${s.sector} (${s.members} 檔)`}>{s.sector}</span>
+                <span className="font-mono">
+                  {s.ret_5d >= 0 ? "+" : ""}{s.ret_5d.toFixed(1)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 pt-3 border-t border-line">
+        <div>
+          <div className="text-[10px] uppercase text-text-muted mb-1.5">5D 領漲 TOP 10</div>
+          <ul className="text-xs font-mono space-y-0.5">
+            {breadth.leaders.map((l) => (
+              <li key={l.symbol} className="flex justify-between items-baseline">
+                <Link href={`/stock/${l.symbol}`} className="text-text-bright hover:text-accent">
+                  {l.symbol} <span className="text-text-muted font-sans">{l.name}</span>
+                </Link>
+                <span className="text-up">+{l.ret_5d.toFixed(1)}%</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase text-text-muted mb-1.5">5D 領跌 TOP 10</div>
+          <ul className="text-xs font-mono space-y-0.5">
+            {breadth.laggards.map((l) => (
+              <li key={l.symbol} className="flex justify-between items-baseline">
+                <Link href={`/stock/${l.symbol}`} className="text-text-bright hover:text-accent">
+                  {l.symbol} <span className="text-text-muted font-sans">{l.name}</span>
+                </Link>
+                <span className="text-down">{l.ret_5d.toFixed(1)}%</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function Stat({ label, value, extra }: { label: string; value: React.ReactNode; extra?: React.ReactNode }) {
+  return (
+    <div className="rounded-md border border-line bg-bg-elevated/30 p-2.5">
+      <div className="text-[10px] uppercase text-text-muted mb-1">{label}</div>
+      <div className="text-base">{value}</div>
+      {extra && <div className="mt-0.5">{extra}</div>}
+    </div>
   );
 }

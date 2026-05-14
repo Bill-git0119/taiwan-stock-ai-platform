@@ -40,6 +40,22 @@ export interface MarketSummary {
   losers: number;
 }
 
+export interface MarketBreadth {
+  as_of: string | null;
+  universe_size: number;
+  advance_decline: { advancing: number; declining: number; ratio: number };
+  above_ma20_pct: number;
+  above_ma50_pct: number;
+  new_highs_20: number;
+  new_lows_20: number;
+  new_highs_60: number;
+  new_lows_60: number;
+  regime_hint: "broad_strength" | "broad_weakness" | "consolidation" | "mixed" | "no_data";
+  sectors: Array<{ sector: string; ret_5d: number; members: number; rank: number }>;
+  leaders: Array<{ symbol: string; name?: string; sector?: string; ret_5d: number; ret_1d: number; last: number }>;
+  laggards: Array<{ symbol: string; name?: string; sector?: string; ret_5d: number; ret_1d: number; last: number }>;
+}
+
 export interface HealthResponse {
   status: string;
   service: string;
@@ -136,6 +152,7 @@ export const api = {
   top10: () => request<Top10Response>("/api/v1/top10"),
   stock: (symbol: string) => request<StockDetail>(`/api/v1/stocks/${encodeURIComponent(symbol)}`),
   marketSummary: () => request<MarketSummary>("/api/v1/market/summary"),
+  marketBreadth: () => request<MarketBreadth>("/api/v1/market/breadth"),
 
   // auth
   register: (data: { email: string; password: string; name?: string; ref?: string }) =>
@@ -328,12 +345,35 @@ export interface ScanItem extends TradePlanResponse {
     scale_out_tp2_pct: number;
     max_hold_bars: number;
   };
+  // Market-context fields attached by scanner_service
+  as_of?: string | null;
+  ret_1d?: number | null;
+  ret_5d?: number | null;
+  ret_20d?: number | null;
+  gap_pct?: number | null;
+  rel_volume?: number | null;
+  rs_5d?: number | null;
+  rs_20d?: number | null;
+  sector?: string;
+  sector_rank?: number | null;
+  sector_count?: number | null;
+  sector_ret_5d?: number | null;
+}
+
+export interface MarketContext {
+  as_of: string | null;
+  market_5d: number;
+  market_20d: number;
+  universe_size: number;
+  sectors: Record<string, { sector: string; ret_5d: number; count: number; rank: number; total: number }>;
 }
 
 export interface ScanResponse {
   scanned: number;
   matched: number;
   disabled_setups: string[];
+  as_of?: string | null;
+  market_context?: MarketContext;
   items: ScanItem[];
 }
 
@@ -488,6 +528,7 @@ export interface TradePlanResponse {
   chip_score: number;
   technical_score: number;
   fundamental_score: number;
+  fundamental_available?: boolean;
   reasons: string[];
   indicators: Record<string, number | string | boolean | null>;
   chip: Record<string, number | string | boolean | null>;
@@ -521,4 +562,5 @@ export interface TradePlanResponse {
   } | null;
   validation?: ValidationInfo | null;
   production_status?: string;
+  as_of?: string | null;
 }

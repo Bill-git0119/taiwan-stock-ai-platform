@@ -35,6 +35,76 @@ from app.strategy_registry.ranker import rank_all
 MIN_BARS = 60
 
 
+def _ret_pct(curr: float, prev: float) -> float:
+    return 0.0 if not prev else (curr / prev - 1.0) * 100.0
+
+
+def _per_symbol_metrics(bars: list[dict]) -> dict:
+    """Extract per-symbol short-term return / volume / gap metrics from bars
+    (already loaded for the trade-plan engine)."""
+    if not bars:
+        return {}
+    last = bars[-1]
+    prev = bars[-2] if len(bars) >= 2 else last
+    d5_anchor = bars[-6] if len(bars) >= 6 else bars[0]
+    d20_anchor = bars[-21] if len(bars) >= 21 else bars[0]
+    # 20-bar avg vol (excluding today)
+    win = bars[-21:-1] if len(bars) >= 21 else bars[:-1]
+    avg_vol = sum(b["volume"] for b in win) / max(1, len(win))
+    return {
+        "as_of": last["date"],
+        "last": float(last["close"]),
+        "ret_1d": round(_ret_pct(last["close"], prev["close"]), 2),
+        "ret_5d": round(_ret_pct(last["close"], d5_anchor["close"]), 2),
+        "ret_20d": round(_ret_pct(last["close"], d20_anchor["close"]), 2),
+        "gap_pct": round(_ret_pct(last["open"], prev["close"]), 2),
+        "rel_volume": round(last["volume"] / avg_vol, 2) if avg_vol > 0 else 1.0,
+    }
+
+
+def _aggregate_market_context(
+    per_symbol: dict[str, dict],
+    sectors: dict[str, str],
+) -> dict:
+    """Build market-wide context: equal-weighted index return as 'market',
+    sector ranking, and the latest as_of timestamp across the universe.
+
+    This proxy is more robust than a single TAIEX feed because it uses the
+    *same* data already loaded for the scan — no extra fetch, no timezone
+    skew, no stale ticker."""
+    if not per_symbol:
+        return {"as_of": None, "market_5d": 0.0, "market_20d": 0.0, "sectors": {}, "universe_size": 0}
+
+    rets_5 = [m["ret_5d"] for m in per_symbol.values()]
+    rets_20 = [m["ret_20d"] for m in per_symbol.values()]
+    market_5 = sum(rets_5) / len(rets_5)
+    market_20 = sum(rets_20) / len(rets_20)
+    as_of = max(m["as_of"] for m in per_symbol.values())
+
+    # Sector aggregation
+    sec_buckets: dict[str, list[float]] = {}
+    for sym, m in per_symbol.items():
+        sec = sectors.get(sym) or "其他"
+        sec_buckets.setdefault(sec, []).append(m["ret_5d"])
+    sec_rows = []
+    for sec, rs in sec_buckets.items():
+        sec_rows.append({
+            "sector": sec,
+            "ret_5d": round(sum(rs) / len(rs), 2),
+            "count": len(rs),
+        })
+    sec_rows.sort(key=lambda x: x["ret_5d"], reverse=True)
+    sectors_out = {row["sector"]: {**row, "rank": i + 1, "total": len(sec_rows)}
+                   for i, row in enumerate(sec_rows)}
+    return {
+        "as_of": as_of,
+        "market_5d": round(market_5, 2),
+        "market_20d": round(market_20, 2),
+        "sectors": sectors_out,
+        "universe_size": len(per_symbol),
+    }
+
+
 def _edge_score(plan_dict: dict) -> float:
     """Heuristic prior used as the ranking signal until each setup has
     >= WINRATE_MIN_SAMPLES evaluated trades. Kept for transparency."""
@@ -150,11 +220,26 @@ async def scan_universe(
         disabled = disabled | _ds(rankings)
 
     stocks = (await session.execute(select(Stock))).scalars().all()
-    rows: List[dict] = []
+    sector_map = {st.symbol: (st.sector or "其他") for st in stocks}
+
+    # First pass: load bars + compute per-symbol metrics so we can build
+    # market context (RS vs market, sector rank) before the plan loop.
+    loaded: dict[str, tuple[list[dict], list[dict]]] = {}
+    per_metrics: dict[str, dict] = {}
     for st in stocks:
         bars, chip_records = await _bars_for(session, st.id)
         if len(bars) < MIN_BARS:
             continue
+        loaded[st.symbol] = (bars, chip_records)
+        per_metrics[st.symbol] = _per_symbol_metrics(bars)
+
+    market_ctx = _aggregate_market_context(per_metrics, sector_map)
+
+    rows: List[dict] = []
+    for st in stocks:
+        if st.symbol not in loaded:
+            continue
+        bars, chip_records = loaded[st.symbol]
         plan_obj = build_plan(
             symbol=st.symbol,
             closes=[b["close"] for b in bars],
@@ -162,12 +247,31 @@ async def scan_universe(
             lows=[b["low"] for b in bars],
             volumes=[b["volume"] for b in bars],
             chip_records=chip_records,
-            fundamental_score=60.0,
+            # Don't fake fundamentals — keep confidence honest until MOPS is wired.
+            fundamental_score=None,
         )
         plan = plan_obj.to_dict()
         plan["name"] = st.name
         plan["market"] = st.market
         plan["edge"] = _edge_score(plan)
+
+        # ── trader context: RS vs equal-weighted market + sector rank ──
+        m = per_metrics.get(st.symbol) or {}
+        plan["as_of"] = m.get("as_of")
+        plan["ret_1d"] = m.get("ret_1d")
+        plan["ret_5d"] = m.get("ret_5d")
+        plan["ret_20d"] = m.get("ret_20d")
+        plan["gap_pct"] = m.get("gap_pct")
+        plan["rel_volume"] = m.get("rel_volume")
+        if m:
+            plan["rs_5d"] = round((m.get("ret_5d") or 0) - market_ctx["market_5d"], 2)
+            plan["rs_20d"] = round((m.get("ret_20d") or 0) - market_ctx["market_20d"], 2)
+        sec_name = sector_map.get(st.symbol, "其他")
+        sec_info = market_ctx["sectors"].get(sec_name) or {}
+        plan["sector"] = sec_name
+        plan["sector_rank"] = sec_info.get("rank")
+        plan["sector_count"] = sec_info.get("total")
+        plan["sector_ret_5d"] = sec_info.get("ret_5d")
 
         # Attach setup stats so the UI can show win-rate / max-loss-streak.
         setup = plan.get("setup")
@@ -286,6 +390,8 @@ async def scan_universe(
         "scanned": len(rows),
         "matched": len(out),
         "disabled_setups": sorted(disabled),
+        "as_of": market_ctx.get("as_of"),
+        "market_context": market_ctx,
         "items": out[:limit],
     }
 
