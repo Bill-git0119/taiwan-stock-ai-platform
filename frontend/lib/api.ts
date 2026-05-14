@@ -267,6 +267,18 @@ export const api = {
     return request<any>(`/api/v1/lab/run/${encodeURIComponent(symbol)}${qs}`);
   },
   labPromoted: () => request<{ promoted: Record<string, any>; thresholds: Record<string, number> }>(`/api/v1/lab/promoted`),
+
+  // Robust Quant Phase
+  stressRun: (strategy: string, symbol = "0050") =>
+    request<any>(`/api/v1/stress/run/${encodeURIComponent(strategy)}?symbol=${encodeURIComponent(symbol)}`),
+  stressSegments: () => request<{ known_segments: any[] }>(`/api/v1/stress/segments`),
+  correlationMatrix: (window = 90) => request<any>(`/api/v1/correlation/matrix?window=${window}`),
+  riskAllocation: (regime: string, baseRiskPct = 0.01, maxConcurrent = 3) =>
+    request<any>(`/api/v1/risk/allocation?regime=${encodeURIComponent(regime)}&base_risk_pct=${baseRiskPct}&max_concurrent=${maxConcurrent}`),
+  portfolioSimulate: (symbol = "0050", strategies = "trend_breakout,chip_follow", maxConcurrent = 3) =>
+    request<any>(`/api/v1/portfolio/simulate?symbol=${encodeURIComponent(symbol)}&strategies=${encodeURIComponent(strategies)}&max_concurrent=${maxConcurrent}`),
+  edgePersistence: (window = 90) => request<any>(`/api/v1/persistence/?window=${window}`),
+  qualityReport: () => request<{ items: any[] }>(`/api/v1/quality/`),
 };
 
 export interface SetupStats {

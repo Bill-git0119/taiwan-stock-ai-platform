@@ -1,97 +1,88 @@
-feat(research): Research Infrastructure Phase complete
+feat(robust-quant): Robust Quant Phase — anti-overfitting infrastructure
 
-Phase 1 — TOP100 Universe
-- backend/app/universe/{curated,liquidity_filter,sector_classifier,
-  universe_builder,manager}.py
-- Curated ~90 symbol universe across 16+ sectors (TWSE-50, mid-cap
-  leaders, TPEX growth, 5 major ETFs)
-- UniverseSnapshot model + alembic 0005
-- Weekly liquidity filter (>= NT$50M notional/day)
-- UniverseManager: get_active_universe, get_sector_members,
-  get_liquid_symbols, sector_breakdown
+Eight invariants. None of them generate signals. All of them gate them.
 
-Phase 2 — Edge schema extension
-- EdgeSignal: sector, mfe_r, mae_r columns
-- StrategyPerformanceDaily table (daily snapshot for ranker history)
-- alembic 0005_research_infra (batch ALTER + new tables)
+Priority 1 — Backfill infrastructure
+- scripts/top100_backfill.py: 5-year curated TOP100 yfinance pull, idempotent
+  (>= 1000 bars / symbol), concurrent with semaphore, structured report
+- scripts/rolling_update.py: daily incremental bars from last persisted date
+- scripts/data_integrity_checker.py: missing-bars / duplicates / anomalous
+  prices (|return| > 50%) / OHLC sanity / thin coverage; exit 1 on failure
 
-Phase 3 — Real Performance Tracking
-- signal_evaluator: writes MFE / MAE alongside outcomes (intrabar
-  excursion, lookahead-free)
-- app/edge/strategy_metrics.py: overall / by_setup / by_regime /
-  by_sector / setup_x_regime — reads ONLY from evaluated edge_signals
-- app/edge/edge_decay.py: recent (30d) vs older (60-90d) expectancy
-  comparison, labels {improving, stable, decaying, broken}
-- app/edge/performance_monitor.py: one-shot snapshot payload
+Priority 2 — Regime Stress Test Engine
+- strategy/stress/regime_segments.py: 6 known segments (2020 crash,
+  2020 recovery, 2021 euphoria, 2022 bear, 2023 AI break, 2024 megacap)
+  + auto-detector for sideways/euphoria/low-vol windows in any series
+- strategy/stress/stress_runner.py: per-segment metrics + composites
+  (cross_regime_consistency, cross_regime_min_pf, single_period_dominance)
 
-Phase 4 — Narrative Intelligence
-- app/narrative/theme_tracker.py: deterministic keyword scoring across
-  12 known themes (AI 半導體, CoWoS, 航運, ETF, 法說會, ...)
-- app/narrative/capital_flow_detector.py: institutional focus from
-  volume anomalies × chip streaks
-- app/narrative/narrative_engine.py: market_style classifier
-  (risk_on / risk_off / neutral / mixed), dominant_themes,
-  leading_sector, institutional_focus, risk_factors, market_summary
+Priority 3 — Strategy Correlation Engine
+- strategy/correlation/correlation_analyzer.py: pairwise Pearson on daily
+  realized-R + drawdown overlap + signal overlap (Jaccard). Flags pairs
+  where any metric exceeds threshold (0.75 / 0.6 / 0.5).
 
-Phase 5 — Strategy Ranking System
-- app/strategy_registry/ranker.py: composite rank
-  = 0.30 * normalize(oos_sharpe)
-  + 0.25 * normalize(profit_factor - 1)
-  + 0.20 * sigmoid(live_expectancy_R)
-  + 0.15 * (1 - max(0, -decay))
-  + 0.10 * normalize(mc_p05_ratio)
-- Production gate: ACTIVE / WATCH / DISABLED / UNKNOWN
-- Disabled when sample<30 | live_pf<1.2 | live_exp<0 | consec_loss>8
+Priority 4 — Robustness Validator
+- app/strategy_lab/robustness.py: gates cross_regime_consistency (>=60%),
+  single_period_dominance (<=60%), MC p05 ratio (>=1.0),
+  MC profitable (>=60%). Composite robustness_score 0..1.
 
-Phase 7 — Adaptive Scanner
-- scanner returns adaptive_score per row:
-    live_expectancy_R * regime_confidence * strategy_rank * chip_strength
-- Disabled-by-ranker setups excluded by default
-- Each row carries production_status + adaptive_breakdown
+Priority 5 — Risk Allocation Engine
+- app/risk_engine/allocator.py: per-regime modifier
+  (trending_up=1.0, sideways=0.4, bearish=0.3, …). Disabled => weight 0,
+  WATCH => weight halved. Outputs weight + max_exposure + signal_risk_pct
+  with portfolio-level concurrency cap.
 
-Phase 8 — Research Automation
-- Scheduler additions (Asia/Taipei):
-  16:00 evaluate_signals (walk-forward outcome marking)
-  17:00 strategy_ranking_refresh (writes StrategyPerformanceDaily)
-  18:00 daily_report (warms research markdown cache)
-  Sun 23:00 universe_rebuild (weekly snapshot)
-- app/services/research_report.py: markdown rendering of full daily
-  research report
+Priority 6 — Portfolio Backtester
+- app/portfolio_backtester/simulator.py: multi-strategy concurrent runner
+  with max_concurrent_positions cap, 1% risk per trade, max-hold timeout.
+  Returns portfolio sharpe/DD, equity curve, per-strategy breakdown,
+  exposure heat-map.
 
-Phase 9 — Production Gates formalized in ranker.GATE
+Priority 7 — Edge Persistence
+- app/edge/edge_persistence.py: 14-bar rolling expectancy series,
+  half-life days (fit y = a*exp(-t/tau)), decay velocity (R/week).
+  Half-life = ln(2)*tau when decay slope < 0, else None.
 
-Phase 10 — Terminal Upgrade
-- New /terminal panels: MARKET NARRATIVE (style + themes + risk factors
-  + institutional focus), STRATEGY HEALTH (live rank table)
-- New /terminal/performance subpage with Live Edge tables:
-  OVERALL stats, STRATEGY RANK with production_status badges,
-  BY SETUP / REGIME / SECTOR breakdowns, SETUP × REGIME matrix,
-  EDGE DECAY table with labels
+Priority 8 — Research Quality Gates
+- app/strategy_registry/research_quality.py:
+  production_research_score = 0.20*sample + 0.20*overfit + 0.15*regime
+                            + 0.15*correlation + 0.15*decay + 0.15*robust
+  >= 0.65 → ACTIVE
+  >= 0.40 → RESEARCH_ONLY (visible only in research panels)
+  <  0.40 → DISABLED
 
-New APIs
-- /api/v1/performance/{snapshot, by-setup, by-regime, by-sector,
-  setup-x-regime, decay}
-- /api/v1/narrative/today
-- /api/v1/universe/{active, sectors, rebuild}
-- /api/v1/strategy-rank/
-- /api/v1/research/{today, today.md}
+API endpoints
+- /api/v1/stress/run/{strategy}?symbol=…
+- /api/v1/stress/segments
+- /api/v1/correlation/matrix?window=…
+- /api/v1/risk/allocation?regime=…
+- /api/v1/portfolio/simulate
+- /api/v1/persistence/?window=…
+- /api/v1/quality/
+
+Scheduler additions
+- 08:00 mon-fri  rolling_update          (incremental OHLCV)
+- 02:00 sat      integrity_check
+- 22:00 sun      correlation_refresh
+- 23:00 sun      universe_rebuild  (already existed; pre-Robust-phase)
+
+Frontend
+- /terminal/robustness: research quality verdict table, strategy
+  correlation matrix, edge persistence half-life table, risk allocation
+- /terminal navigation updated: Brief / Performance / Robustness
+
+Tests: 132/132 passing (15 new)
+- test_robust_quant.py: stress segments + filter, correlation flagging,
+  robustness gates, allocator regime sensitivity, portfolio max_concurrent,
+  persistence rolling expectancy, quality ACTIVE/RESEARCH_ONLY/DISABLED
 
 Iron rules upheld
-- No lookahead — evaluator walks forward only
-- All data traceable — edge_signals real outcomes only for performance
-- No fake stats — backtest data never mixed into performance APIs
-- Production gates enforced in scanner & ranker
-- TOP100 universe deterministic, hand-curated, version-controlled
-
-Tests: 117/117 passing
-- test_research_infra.py (10 new):
-  * universe build/manager + curated uniqueness
-  * MFE/MAE evaluator
-  * by-setup / by-regime breakdowns
-  * theme tracker positive + negative
-  * ranker no-data + low-sample
-  * decay labels
-
-Frontend build: 22 routes, 0 errors
+- No lookahead: stress runs use backtest_engine_v2's next-bar fills
+- All data traceable: stress segments are real date ranges, correlation
+  is computed from real edge_signals only
+- No fake stats: portfolio sim, persistence, quality all derive from
+  evaluated outcomes
+- Production gates compound: ranker × robustness × research_quality
+- Quality + correlation now gate ACTIVE status — fewer, better signals
 
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>

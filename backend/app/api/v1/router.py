@@ -1,10 +1,11 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
-    admin, auth, backtest, billing, blog, brief, health, intelligence,
-    intraday, leaderboard, market, narrative, notify, performance,
-    referral, research_report, scanner, stocks, strategy_lab,
-    strategy_ranking, trade_plan, universe,
+    admin, auth, backtest, billing, blog, brief, correlation, health,
+    intelligence, intraday, leaderboard, market, narrative, notify,
+    performance, persistence, portfolio, quality, referral,
+    research_report, risk, scanner, stocks, strategy_lab,
+    strategy_ranking, stress, trade_plan, universe,
 )
 
 api_router = APIRouter()
@@ -30,6 +31,12 @@ api_router.include_router(narrative.router, prefix="/narrative", tags=["narrativ
 api_router.include_router(universe.router, prefix="/universe", tags=["universe"])
 api_router.include_router(strategy_ranking.router, prefix="/strategy-rank", tags=["strategy-rank"])
 api_router.include_router(research_report.router, prefix="/research", tags=["research"])
+api_router.include_router(stress.router, prefix="/stress", tags=["stress"])
+api_router.include_router(correlation.router, prefix="/correlation", tags=["correlation"])
+api_router.include_router(risk.router, prefix="/risk", tags=["risk"])
+api_router.include_router(portfolio.router, prefix="/portfolio", tags=["portfolio"])
+api_router.include_router(persistence.router, prefix="/persistence", tags=["persistence"])
+api_router.include_router(quality.router, prefix="/quality", tags=["quality"])
 
 # Convenience shortcut: GET /api/v1/top10
 api_router.add_api_route("/top10", stocks.get_top10, methods=["GET"], tags=["stocks"])

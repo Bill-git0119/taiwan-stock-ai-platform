@@ -74,6 +74,7 @@ export default function TerminalPage() {
             <nav className="flex gap-3 text-[11px] font-mono uppercase tracking-widest">
               <span className="text-accent border-b border-accent pb-0.5">Brief</span>
               <Link href="/terminal/performance" className="text-text-muted hover:text-text">Performance</Link>
+              <Link href="/terminal/robustness" className="text-text-muted hover:text-text">Robustness</Link>
             </nav>
             {brief && (
               <span className="font-mono text-[10px] text-text-muted">

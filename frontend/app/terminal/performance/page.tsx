@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { Activity, BarChart3, ShieldCheck, TrendingDown, Cpu } from "lucide-react";
 
+import Link from "next/link";
+
 import { Topbar } from "@/components/layout/Topbar";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -61,18 +63,25 @@ export default function PerformancePage() {
               真實 signal 績效 · 來源僅限 edge_signals.evaluated=true · 無回測數據混入
             </p>
           </div>
-          <div className="flex gap-1.5">
-            {WINDOWS.map((w) => (
-              <button key={w} onClick={() => setWindow(w)}
-                className={cn(
-                  "px-2.5 py-1 rounded font-mono text-[11px] border transition",
-                  w === window
-                    ? "border-accent text-accent bg-accent/10"
-                    : "border-line text-text-muted hover:text-text",
-                )}>
-                {w}D
-              </button>
-            ))}
+          <div className="flex items-center gap-4">
+            <nav className="flex gap-3 text-[11px] font-mono uppercase tracking-widest">
+              <Link href="/terminal" className="text-text-muted hover:text-text">Brief</Link>
+              <span className="text-accent border-b border-accent pb-0.5">Performance</span>
+              <Link href="/terminal/robustness" className="text-text-muted hover:text-text">Robustness</Link>
+            </nav>
+            <div className="flex gap-1.5">
+              {WINDOWS.map((w) => (
+                <button key={w} onClick={() => setWindow(w)}
+                  className={cn(
+                    "px-2.5 py-1 rounded font-mono text-[11px] border transition",
+                    w === window
+                      ? "border-accent text-accent bg-accent/10"
+                      : "border-line text-text-muted hover:text-text",
+                  )}>
+                  {w}D
+                </button>
+              ))}
+            </div>
           </div>
         </header>
 

@@ -152,6 +152,43 @@ async def job_universe_rebuild() -> None:
         log.exception("universe_rebuild failed: %s", e)
 
 
+async def job_rolling_update() -> None:
+    """08:00 — incremental OHLCV pull for every stock in DB."""
+    log.info("[scheduler] rolling_update")
+    try:
+        from scripts.rolling_update import run as _run
+        rep = await _run()
+        log.info("rolling_update: %s", rep)
+    except Exception as e:
+        log.exception("rolling_update failed: %s", e)
+
+
+async def job_correlation_refresh() -> None:
+    """Sun 22:00 — recompute correlation matrix; cache will warm on first call."""
+    log.info("[scheduler] correlation_refresh")
+    try:
+        from strategy.correlation.correlation_analyzer import correlation_matrix
+        async with async_session_maker() as s:
+            res = await correlation_matrix(s)
+        log.info("correlation_refresh: %d flagged pairs",
+                  len(res.get("flagged_pairs", [])))
+    except Exception as e:
+        log.exception("correlation_refresh failed: %s", e)
+
+
+async def job_integrity_check() -> None:
+    """Sat 02:00 — run data integrity checker."""
+    log.info("[scheduler] integrity_check")
+    try:
+        from scripts.data_integrity_checker import check
+        rep = await check()
+        log.info("integrity_check: passes=%s thin=%d missing=%d",
+                  rep["passes"], len(rep["thin_coverage"]),
+                  len(rep["missing_bars"]))
+    except Exception as e:
+        log.exception("integrity_check failed: %s", e)
+
+
 async def job_daily_report() -> None:
     """18:00 — pre-render the research report so cache is warm."""
     log.info("[scheduler] 18:00 daily_report")
@@ -204,7 +241,10 @@ def start() -> AsyncIOScheduler:
     sched.add_job(job_evaluate_signals,        CronTrigger(day_of_week="mon-fri", hour=16, minute=0,  timezone=s.scheduler_timezone), id="evaluate_signals")
     sched.add_job(job_strategy_ranking_refresh,CronTrigger(day_of_week="mon-fri", hour=17, minute=0,  timezone=s.scheduler_timezone), id="strategy_ranking_refresh")
     sched.add_job(job_daily_report,            CronTrigger(day_of_week="mon-fri", hour=18, minute=0,  timezone=s.scheduler_timezone), id="daily_report")
+    sched.add_job(job_rolling_update,          CronTrigger(day_of_week="mon-fri", hour=8,  minute=0,  timezone=s.scheduler_timezone), id="rolling_update")
     sched.add_job(job_universe_rebuild,        CronTrigger(day_of_week="sun",     hour=23, minute=0,  timezone=s.scheduler_timezone), id="universe_rebuild")
+    sched.add_job(job_correlation_refresh,     CronTrigger(day_of_week="sun",     hour=22, minute=0,  timezone=s.scheduler_timezone), id="correlation_refresh")
+    sched.add_job(job_integrity_check,         CronTrigger(day_of_week="sat",     hour=2,  minute=0,  timezone=s.scheduler_timezone), id="integrity_check")
     sched.start()
     _scheduler = sched
     log.info("APScheduler started in %s with %d jobs", s.scheduler_timezone, len(sched.get_jobs()))
