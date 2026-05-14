@@ -36,7 +36,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 MIN_BARS_REQUIRED = 1000
 MAX_DAILY_RETURN_PCT = 50.0
-MAX_GAP_TRADING_DAYS = 5
+# Taiwan Lunar New Year can close the market for up to 9 consecutive weekdays
+# (e.g. 2024 LNY closed Feb 5-14). Anything beyond that is a real data gap.
+MAX_GAP_TRADING_DAYS = 10
 
 
 def _is_weekday(d: date) -> bool:

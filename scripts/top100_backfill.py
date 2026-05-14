@@ -59,12 +59,27 @@ async def _ensure_stock(session, sym: str, name: str, market: str, sector: str) 
     return st
 
 
+def _scalar(v):
+    """Coerce any pandas Series/array of length 1 to a Python scalar."""
+    if hasattr(v, "item"):
+        try:
+            return v.item()
+        except (ValueError, AttributeError):
+            pass
+    if hasattr(v, "iloc"):
+        try:
+            return v.iloc[0]
+        except Exception:
+            pass
+    return v
+
+
 async def _upsert_bars(session, stock_id: int, df: pd.DataFrame) -> int:
     if df.empty:
         return 0
     n = 0
     for _, row in df.iterrows():
-        d = row["date"]
+        d = _scalar(row["date"])
         if hasattr(d, "date"):
             d = d.date()
         existing = (await session.execute(
@@ -73,11 +88,17 @@ async def _upsert_bars(session, stock_id: int, df: pd.DataFrame) -> int:
                 DailyPrice.date == d,
             )
         )).scalar_one_or_none()
-        fields = dict(
-            open=float(row["open"]), high=float(row["high"]),
-            low=float(row["low"]), close=float(row["close"]),
-            volume=int(row.get("volume") or 0),
-        )
+        try:
+            fields = dict(
+                open=float(_scalar(row["open"])),
+                high=float(_scalar(row["high"])),
+                low=float(_scalar(row["low"])),
+                close=float(_scalar(row["close"])),
+                volume=int(_scalar(row.get("volume") or 0)),
+            )
+        except (TypeError, ValueError):
+            # Bad row — skip rather than abort entire backfill
+            continue
         if existing is None:
             session.add(DailyPrice(stock_id=stock_id, date=d, **fields))
         else:

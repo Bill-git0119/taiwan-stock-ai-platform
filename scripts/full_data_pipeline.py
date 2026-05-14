@@ -93,16 +93,30 @@ def fetch_yahoo_history(symbol: str, days: int) -> pd.DataFrame:
             df = pd.DataFrame()
         if df is None or df.empty:
             continue
+        # yfinance >= 0.2.x returns MultiIndex columns. The level holding field
+        # names can be 0 OR 1 depending on version + whether group_by="column".
+        # Pick whichever level actually contains the OHLCV field names.
         if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
+            FIELD_TAGS = {"Open", "High", "Low", "Close", "Adj Close", "Volume"}
+            lv0 = set(df.columns.get_level_values(0))
+            lv1 = set(df.columns.get_level_values(1))
+            level = 0 if (FIELD_TAGS & lv0) else (1 if (FIELD_TAGS & lv1) else 0)
+            df.columns = df.columns.get_level_values(level)
+        # Deduplicate columns (some yfinance paths emit both "Close" and "Adj Close")
+        df = df.loc[:, ~df.columns.duplicated()]
         df = df.rename(columns={
             "Open": "open", "High": "high", "Low": "low",
             "Close": "close", "Volume": "volume",
         })
+        # Defensive: if rename produced duplicate "close" cols, drop later ones
+        df = df.loc[:, ~df.columns.duplicated()]
         df = df.reset_index().rename(columns={"Date": "date"})
         df["symbol"] = symbol
         df["market"] = "TWSE" if suffix == ".TW" else "TPEX"
-        df = df[["date", "symbol", "market", "open", "high", "low", "close", "volume"]].dropna()
+        keep = ["date", "symbol", "market", "open", "high", "low", "close", "volume"]
+        # Some rows can have NaN volume from yfinance; coerce to int safely.
+        df = df.reindex(columns=keep)
+        df = df.dropna(subset=["open", "high", "low", "close"])
         if not df.empty:
             return df
     return pd.DataFrame()

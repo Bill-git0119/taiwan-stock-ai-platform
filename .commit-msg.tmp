@@ -1,88 +1,56 @@
-feat(robust-quant): Robust Quant Phase — anti-overfitting infrastructure
+fix(quant): ADX line uses proper Wilder RMA + yfinance MultiIndex hardening
 
-Eight invariants. None of them generate signals. All of them gate them.
+Issues discovered during 5-year TOP100 backfill:
 
-Priority 1 — Backfill infrastructure
-- scripts/top100_backfill.py: 5-year curated TOP100 yfinance pull, idempotent
-  (>= 1000 bars / symbol), concurrent with semaphore, structured report
-- scripts/rolling_update.py: daily incremental bars from last persisted date
-- scripts/data_integrity_checker.py: missing-bars / duplicates / anomalous
-  prices (|return| > 50%) / OHLC sanity / thin coverage; exit 1 on failure
+1. ADX runaway (observed: ADX=575 on 5y of 0050 data)
+   `_wilder_smooth` was applied to the DX→ADX line, but that function
+   implements Wilder's *running-sum* smoothing meant for TR/DM. It adds
+   the raw value each bar instead of value/n, causing the smoothed
+   output to grow unbounded over long histories.
 
-Priority 2 — Regime Stress Test Engine
-- strategy/stress/regime_segments.py: 6 known segments (2020 crash,
-  2020 recovery, 2021 euphoria, 2022 bear, 2023 AI break, 2024 megacap)
-  + auto-detector for sideways/euphoria/low-vol windows in any series
-- strategy/stress/stress_runner.py: per-segment metrics + composites
-  (cross_regime_consistency, cross_regime_min_pf, single_period_dominance)
+   The DI calculation cancels out the missing 1/n factor because both
+   numerator (smoothed DM) and denominator (smoothed TR) use the same
+   smoother. ADX has no such cancellation — it needs proper averaging.
 
-Priority 3 — Strategy Correlation Engine
-- strategy/correlation/correlation_analyzer.py: pairwise Pearson on daily
-  realized-R + drawdown overlap + signal overlap (Jaccard). Flags pairs
-  where any metric exceeds threshold (0.75 / 0.6 / 0.5).
+   Fix: introduce `_wilder_average` (the correct RMA used for the ADX
+   line) and route the DX → ADX smoothing through it.
 
-Priority 4 — Robustness Validator
-- app/strategy_lab/robustness.py: gates cross_regime_consistency (>=60%),
-  single_period_dominance (<=60%), MC p05 ratio (>=1.0),
-  MC profitable (>=60%). Composite robustness_score 0..1.
+   Before: 0050 5y bars → ADX=575.19 (off-scale)
+   After : 0050 5y bars → ADX=41.09  (correct trending_up signal)
 
-Priority 5 — Risk Allocation Engine
-- app/risk_engine/allocator.py: per-regime modifier
-  (trending_up=1.0, sideways=0.4, bearish=0.3, …). Disabled => weight 0,
-  WATCH => weight halved. Outputs weight + max_exposure + signal_risk_pct
-  with portfolio-level concurrency cap.
+2. yfinance MultiIndex columns
+   yfinance >= 0.2.x returns MultiIndex columns where the level holding
+   field names ("Open", "High", ...) can be 0 OR 1 depending on version
+   and `group_by`. Previous code assumed level 0, producing duplicate
+   columns and breaking float() conversion in upsert.
 
-Priority 6 — Portfolio Backtester
-- app/portfolio_backtester/simulator.py: multi-strategy concurrent runner
-  with max_concurrent_positions cap, 1% risk per trade, max-hold timeout.
-  Returns portfolio sharpe/DD, equity curve, per-strategy breakdown,
-  exposure heat-map.
+   Fix: detect which level actually contains OHLCV field names, then
+   deduplicate columns post-rename. Backfill upsert also coerces
+   anything pandas-shaped to a scalar before float() / int().
 
-Priority 7 — Edge Persistence
-- app/edge/edge_persistence.py: 14-bar rolling expectancy series,
-  half-life days (fit y = a*exp(-t/tau)), decay velocity (R/week).
-  Half-life = ln(2)*tau when decay slope < 0, else None.
+3. Lunar New Year false positives in data_integrity_checker
+   TW market closes for up to 9 consecutive weekdays around Lunar
+   New Year. Threshold raised from MAX_GAP_TRADING_DAYS=5 to 10.
 
-Priority 8 — Research Quality Gates
-- app/strategy_registry/research_quality.py:
-  production_research_score = 0.20*sample + 0.20*overfit + 0.15*regime
-                            + 0.15*correlation + 0.15*decay + 0.15*robust
-  >= 0.65 → ACTIVE
-  >= 0.40 → RESEARCH_ONLY (visible only in research panels)
-  <  0.40 → DISABLED
+Backfill report (local, taiwan_stock.db):
+    universe = 94 curated symbols
+    ok       = 92 (>= 1000 bars, ~5 trading years)
+    thin     = 1  (00919 — newer ETF, 865 bars)
+    failed   = 1  (2888  — delisted/merged)
+    total    = ~115k DailyPrice rows
 
-API endpoints
-- /api/v1/stress/run/{strategy}?symbol=…
-- /api/v1/stress/segments
-- /api/v1/correlation/matrix?window=…
-- /api/v1/risk/allocation?regime=…
-- /api/v1/portfolio/simulate
-- /api/v1/persistence/?window=…
-- /api/v1/quality/
+Verified locally:
+    /api/v1/scanner/scan?bias=LONG → 9 LONG across 93 symbols, all
+        with data_source="real", real RSI (32-90), real prices
+    /api/v1/brief/today regime → trending_up, ADX=41.09,
+        slope200=+0.34%/bar
+    /api/v1/universe/active → 86 active / 8 inactive (liquidity floor)
+    6 LONG signals persisted to edge_signals for walk-forward evaluation
 
-Scheduler additions
-- 08:00 mon-fri  rolling_update          (incremental OHLCV)
-- 02:00 sat      integrity_check
-- 22:00 sun      correlation_refresh
-- 23:00 sun      universe_rebuild  (already existed; pre-Robust-phase)
+Tests: 132/132 still green after all fixes.
 
-Frontend
-- /terminal/robustness: research quality verdict table, strategy
-  correlation matrix, edge persistence half-life table, risk allocation
-- /terminal navigation updated: Brief / Performance / Robustness
-
-Tests: 132/132 passing (15 new)
-- test_robust_quant.py: stress segments + filter, correlation flagging,
-  robustness gates, allocator regime sensitivity, portfolio max_concurrent,
-  persistence rolling expectancy, quality ACTIVE/RESEARCH_ONLY/DISABLED
-
-Iron rules upheld
-- No lookahead: stress runs use backtest_engine_v2's next-bar fills
-- All data traceable: stress segments are real date ranges, correlation
-  is computed from real edge_signals only
-- No fake stats: portfolio sim, persistence, quality all derive from
-  evaluated outcomes
-- Production gates compound: ranker × robustness × research_quality
-- Quality + correlation now gate ACTIVE status — fewer, better signals
+New helper:
+    scripts/persist_today_signals.py — one-shot CLI to seed edge_signals
+    when the scheduler hasn't run yet.
 
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>

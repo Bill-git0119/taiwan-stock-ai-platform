@@ -45,13 +45,36 @@ def _ema_series(vals: Sequence[float], n: int) -> List[float]:
 
 
 def _wilder_smooth(vals: List[float], n: int) -> List[float]:
-    """Wilder's smoothing — used by ATR/ADX. Returns length len(vals)-n+1."""
+    """Wilder's running-sum smoothing for TR / DM.
+
+    smoothed[i] = smoothed[i-1] - smoothed[i-1]/n + raw[i]
+
+    Used as the denominator for DI/ADX where the missing 1/n factor cancels
+    in the ratio. Do NOT use this directly to smooth DX → ADX; use
+    `_wilder_average` for that (which is a proper RMA dividing by n).
+    """
+    if len(vals) < n:
+        return []
+    first = sum(vals[:n])  # initial seed is sum (not avg) for Wilder RMS
+    out = [first]
+    for v in vals[n:]:
+        out.append(out[-1] - out[-1] / n + v)
+    return out
+
+
+def _wilder_average(vals: List[float], n: int) -> List[float]:
+    """Wilder's running average (RMA) — averaging variant for ADX smoothing.
+
+    smoothed[i] = ((n-1) * smoothed[i-1] + raw[i]) / n
+
+    The classic ADX line uses this — output stays in DX's 0..100 range.
+    """
     if len(vals) < n:
         return []
     first = sum(vals[:n]) / n
     out = [first]
     for v in vals[n:]:
-        out.append(out[-1] - out[-1] / n + v)
+        out.append(((n - 1) * out[-1] + v) / n)
     return out
 
 
@@ -86,7 +109,8 @@ def _adx_series(highs: Sequence[float], lows: Sequence[float],
     ]
     if len(dx) < n:
         return []
-    return _wilder_smooth(dx, n)
+    # ADX uses the *averaging* smoother (RMA) so output stays in 0..100.
+    return _wilder_average(dx, n)
 
 
 def _atr_series(highs: Sequence[float], lows: Sequence[float],
