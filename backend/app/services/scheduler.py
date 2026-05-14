@@ -66,6 +66,32 @@ async def job_refresh_trade_plans() -> None:
         log.warning("cache clear failed: %s", e)
 
 
+async def job_persist_signals() -> None:
+    """15:35 — run scanner with persist=True so today's LONG plans get
+    written to edge_signals for later evaluation."""
+    log.info("[scheduler] 15:35 persist_signals")
+    try:
+        from app.services.scanner_service import scan_universe
+        async with async_session_maker() as s:
+            res = await scan_universe(s, bias_filter="LONG", persist=True, limit=200)
+        log.info("persist_signals: matched=%d", res.get("matched", 0))
+    except Exception as e:
+        log.exception("persist_signals failed: %s", e)
+
+
+async def job_evaluate_signals() -> None:
+    """09:00 — walk forward through any unevaluated signals at least
+    EVAL_HORIZON_BARS days old and mark TP/SL/timeout outcomes."""
+    log.info("[scheduler] 09:00 evaluate_signals")
+    try:
+        from app.services.edge_tracking_service import evaluate_open_signals
+        async with async_session_maker() as s:
+            res = await evaluate_open_signals(s)
+        log.info("evaluate_signals: %s", res)
+    except Exception as e:
+        log.exception("evaluate_signals failed: %s", e)
+
+
 async def _push(kind: str, min_plan: str = "elite") -> None:
     async with async_session_maker() as s:
         rows = await load_top10(s)
@@ -96,12 +122,14 @@ def start() -> AsyncIOScheduler:
     s = get_settings()
     sched = AsyncIOScheduler(timezone=s.scheduler_timezone)
     sched.add_job(job_update_data,        CronTrigger(day_of_week="mon-fri", hour=8,  minute=50, timezone=s.scheduler_timezone), id="update_data")
-    sched.add_job(job_send_open,          CronTrigger(day_of_week="mon-fri", hour=9,  minute=0,  timezone=s.scheduler_timezone), id="send_open")
+    sched.add_job(job_evaluate_signals,   CronTrigger(day_of_week="mon-fri", hour=9,  minute=0,  timezone=s.scheduler_timezone), id="evaluate_signals")
+    sched.add_job(job_send_open,          CronTrigger(day_of_week="mon-fri", hour=9,  minute=5,  timezone=s.scheduler_timezone), id="send_open")
     sched.add_job(job_send_intraday,      CronTrigger(day_of_week="mon-fri", hour=13, minute=25, timezone=s.scheduler_timezone), id="send_intraday")
     sched.add_job(job_ingest_daily,       CronTrigger(day_of_week="mon-fri", hour=15, minute=10, timezone=s.scheduler_timezone), id="ingest_daily")
     sched.add_job(job_run_scoring,        CronTrigger(day_of_week="mon-fri", hour=15, minute=20, timezone=s.scheduler_timezone), id="run_scoring")
     sched.add_job(job_refresh_trade_plans,CronTrigger(day_of_week="mon-fri", hour=15, minute=25, timezone=s.scheduler_timezone), id="refresh_trade_plans")
     sched.add_job(job_send_close,         CronTrigger(day_of_week="mon-fri", hour=15, minute=30, timezone=s.scheduler_timezone), id="send_close")
+    sched.add_job(job_persist_signals,    CronTrigger(day_of_week="mon-fri", hour=15, minute=35, timezone=s.scheduler_timezone), id="persist_signals")
     sched.start()
     _scheduler = sched
     log.info("APScheduler started in %s with %d jobs", s.scheduler_timezone, len(sched.get_jobs()))

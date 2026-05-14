@@ -24,6 +24,7 @@ if str(_ROOT) not in sys.path:
 
 from technical_analysis.calculator import Indicators, IndicatorBundle  # noqa: E402
 from chip_analysis.calculator import ChipMetrics, ChipBundle  # noqa: E402
+from strategy.market_regime import detect_regime, setup_allowed  # noqa: E402
 
 
 # ─────────────────────────── iron rules ─────────────────────────────
@@ -57,6 +58,8 @@ class TradePlan:
     last_close: Optional[float] = None
     atr: Optional[float] = None
     position_size_hint: Optional[dict] = None  # account-based suggestion
+    regime: Optional[dict] = None          # {label, adx, allowed_setups, ...}
+    management: Optional[dict] = None      # dynamic stop rules — informational
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -165,6 +168,11 @@ def build_plan(
         _confidence(plan.chip_score, plan.technical_score, plan.fundamental_score), 4,
     ) or 0.0
 
+    # Market regime gate (Iron rule: only trade setups appropriate to regime)
+    regime = detect_regime(closes, list(highs) if highs else None,
+                           list(lows) if lows else None)
+    plan.regime = regime.to_dict()
+
     # Iron rule: structure required
     if not _structure_ok(ind):
         plan.no_trade_reason = "no_structure (ATR missing)"
@@ -173,6 +181,11 @@ def build_plan(
     setup = _detect_long_setup(ind, cb)
     if setup is None:
         plan.no_trade_reason = "no_qualifying_setup"
+        return plan
+
+    # Regime gate — refuse setup if not in allowed list for this regime
+    if not setup_allowed(setup, regime.label):
+        plan.no_trade_reason = f"regime_block ({regime.label})"
         return plan
 
     last = ind.last
@@ -265,4 +278,14 @@ def build_plan(
     plan.risk_reward = _round(rr, 2)
     plan.reasons = reasons
     plan.position_size_hint = pos_hint
+
+    # Dynamic stop management — informational rules the trader/automation runs
+    plan.management = {
+        "move_to_breakeven_at_r": 1.0,         # at +1R, move stop to entry
+        "trailing_stop_atr_mult": 2.0,         # after that, trail at 2*ATR
+        "trailing_stop_value": _round(last - 2.0 * atr, 2),
+        "scale_out_tp1_pct": 50,               # take 50% off at TP1
+        "scale_out_tp2_pct": 50,
+        "max_hold_bars": 12,                   # if neither TP nor SL — exit
+    }
     return plan

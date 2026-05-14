@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.services.cache_service import cached
 from app.services.scanner_service import scan_movers, scan_sectors, scan_universe
+from app.services.strategy_health import health_report
 
 router = APIRouter()
 
@@ -19,15 +20,20 @@ async def scan(
     setup: Optional[str] = Query(None),
     min_rr: Optional[float] = Query(None, ge=0),
     min_confidence: Optional[float] = Query(None, ge=0, le=1),
+    min_winrate: Optional[float] = Query(None, ge=0, le=1),
+    include_disabled: bool = Query(False),
     limit: int = Query(60, ge=1, le=200),
     session: AsyncSession = Depends(get_db),
 ):
-    """Run trade-plan engine across the whole universe and rank by edge.
+    """Run trade-plan engine across the whole universe and rank by
+    expectancy × frequency × confidence.
 
-    Default with no filters returns every symbol's plan (LONG + NO_TRADE)
-    so the UI can show all setups; pass ?bias=LONG&min_rr=1.5 for actionable.
+    Disabled setups (auto-disable rule) excluded unless include_disabled=true.
     """
-    cache_key = f"scan:{bias}:{setup}:{min_rr}:{min_confidence}:{limit}"
+    cache_key = (
+        f"scan:{bias}:{setup}:{min_rr}:{min_confidence}:"
+        f"{min_winrate}:{include_disabled}:{limit}"
+    )
 
     async def loader():
         return await scan_universe(
@@ -36,6 +42,8 @@ async def scan(
             min_rr=min_rr,
             min_confidence=min_confidence,
             setup_filter=setup,
+            min_winrate=min_winrate,
+            include_disabled=include_disabled,
             limit=limit,
         )
     return await cached(cache_key, loader, ttl=180)
@@ -43,7 +51,6 @@ async def scan(
 
 @router.get("/movers")
 async def movers(session: AsyncSession = Depends(get_db)):
-    """Today's gainers, losers, gap-ups, volume spikes, breakouts."""
     async def loader():
         return await scan_movers(session)
     return await cached("movers", loader, ttl=120)
@@ -51,7 +58,17 @@ async def movers(session: AsyncSession = Depends(get_db)):
 
 @router.get("/sectors")
 async def sectors(session: AsyncSession = Depends(get_db)):
-    """Sector strength heatmap (1d / 5d returns, top leaders)."""
     async def loader():
         return await scan_sectors(session)
     return await cached("sectors", loader, ttl=300)
+
+
+@router.get("/strategy-health")
+async def strategy_health(session: AsyncSession = Depends(get_db)):
+    """Per-setup historical performance + auto-disable status.
+
+    Public — there is value in users seeing why a setup is disabled.
+    """
+    async def loader():
+        return {"setups": await health_report(session)}
+    return await cached("strategy-health", loader, ttl=600)

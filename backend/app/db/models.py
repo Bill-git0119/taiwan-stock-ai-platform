@@ -221,6 +221,43 @@ class StockPick(Base):
     return_pct: Mapped[float] = mapped_column(Float, default=0.0)  # measured later
 
 
+class EdgeSignal(Base):
+    """Every LONG plan emitted by the scanner is persisted here.
+
+    Used to compute *real* historical performance per setup so the scanner
+    can rank by `expectancy * frequency * confidence` instead of a heuristic.
+    """
+    __tablename__ = "edge_signals"
+    __table_args__ = (
+        UniqueConstraint("date", "symbol", "setup", name="uq_edge_signals_date_symbol_setup"),
+        Index("ix_edge_signals_setup_date", "setup", "date"),
+        Index("ix_edge_signals_evaluated", "evaluated"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    setup: Mapped[str] = mapped_column(String(48), nullable=False)
+    bias: Mapped[str] = mapped_column(String(8), default="LONG")
+    regime: Mapped[Optional[str]] = mapped_column(String(32))
+    entry: Mapped[float] = mapped_column(Float, nullable=False)
+    stop_loss: Mapped[float] = mapped_column(Float, nullable=False)
+    tp1: Mapped[float] = mapped_column(Float, nullable=False)
+    tp2: Mapped[float] = mapped_column(Float, nullable=False)
+    risk_reward: Mapped[float] = mapped_column(Float, default=0.0)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    edge_score: Mapped[float] = mapped_column(Float, default=0.0)
+    # outcome — filled by the daily evaluator
+    evaluated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    evaluated_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    exit_reason: Mapped[Optional[str]] = mapped_column(String(16))  # stop / tp1 / tp2 / timeout
+    exit_price: Mapped[Optional[float]] = mapped_column(Float)
+    realized_r: Mapped[Optional[float]] = mapped_column(Float)      # in R units
+    win: Mapped[Optional[bool]] = mapped_column(Boolean)
+    bars_held: Mapped[Optional[int]] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class NotificationLog(Base):
     __tablename__ = "notification_logs"
 

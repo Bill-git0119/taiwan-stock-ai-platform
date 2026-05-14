@@ -244,19 +244,175 @@ export const api = {
   },
   movers: () => request<MoversResponse>("/api/v1/scanner/movers"),
   sectors: () => request<SectorsResponse>("/api/v1/scanner/sectors"),
+
+  // AI Trading Research Terminal
+  brief: () => request<DailyBriefResponse>("/api/v1/brief/today"),
+  intelNews: (limit = 30) => request<{ count: number; items: NewsItem[] }>(`/api/v1/intelligence/news?limit=${limit}`),
+  intelSectors: () => request<{ sectors: IntelSectorRow[]; top_leaders: any[]; bottom_laggards: any[] }>(`/api/v1/intelligence/sectors`),
+  intelVolumes: (minRatio = 2.0) => request<{ items: VolumeAnomaly[] }>(`/api/v1/intelligence/volume-anomalies?min_ratio=${minRatio}`),
+  intelPtt: () => request<PttHot>(`/api/v1/intelligence/ptt`),
+  labRun: (symbol: string, strategy?: string) => {
+    const qs = strategy ? `?strategy=${encodeURIComponent(strategy)}` : "";
+    return request<any>(`/api/v1/lab/run/${encodeURIComponent(symbol)}${qs}`);
+  },
+  labPromoted: () => request<{ promoted: Record<string, any>; thresholds: Record<string, number> }>(`/api/v1/lab/promoted`),
 };
+
+export interface SetupStats {
+  setup: string;
+  sample_size: number;
+  win_rate: number;
+  avg_rr: number;
+  expectancy: number;
+  max_consecutive_loss: number;
+  avg_bars_held: number;
+  last_30d_count: number;
+  is_healthy: boolean;
+}
+
+export interface RankBreakdown {
+  mode: "validated" | "prior";
+  expectancy: number | null;
+  frequency: number | null;
+  confidence: number;
+  sample_size: number;
+}
+
+export interface RegimeInfo {
+  label: string;
+  adx?: number | null;
+  ema200_slope_pct?: number | null;
+  ema50_slope_pct?: number | null;
+  atr_contraction?: number | null;
+  allowed_setups: string[];
+  reason: string;
+}
 
 export interface ScanItem extends TradePlanResponse {
   name: string;
   market: string;
   edge: number;
   data_source?: string;
+  rank: number;
+  rank_breakdown?: RankBreakdown;
+  stats?: SetupStats | null;
+  regime?: RegimeInfo;
+  management?: {
+    move_to_breakeven_at_r: number;
+    trailing_stop_atr_mult: number;
+    trailing_stop_value: number | null;
+    scale_out_tp1_pct: number;
+    scale_out_tp2_pct: number;
+    max_hold_bars: number;
+  };
 }
 
 export interface ScanResponse {
   scanned: number;
   matched: number;
+  disabled_setups: string[];
   items: ScanItem[];
+}
+
+export interface StrategyHealthResponse {
+  setups: Record<string, SetupStats & { is_healthy: boolean; reason: string }>;
+}
+
+export interface ValidationInfo {
+  status: "validated" | "unvalidated" | "n/a";
+  win_rate?: number;
+  profit_factor?: number;
+  max_drawdown_r?: number;
+  expectancy_r?: number;
+  sample_size?: number;
+  reason?: string;
+}
+
+export interface NewsItem {
+  id: number;
+  title: string;
+  summary: string;
+  url: string;
+  source: string;
+  published_at: string;
+  keywords: string[];
+  mentioned_symbols: string[];
+}
+
+export interface IntelSectorRow {
+  sector: string;
+  count: number;
+  return_5d: number | null;
+  return_20d: number;
+  rs_rank: number;
+  momentum: number;
+  leaders: Array<{ symbol: string; name: string; return_5d: number | null; return_20d: number; last_close: number | null }>;
+}
+
+export interface VolumeAnomaly {
+  symbol: string;
+  name: string;
+  date: string;
+  close: number;
+  change_pct: number;
+  volume: number;
+  avg_volume_20d: number;
+  ratio: number;
+}
+
+export interface PttHot {
+  titles_seen: number;
+  avg_push: number;
+  hot_symbols: Array<{ symbol: string; mentions: number }>;
+  hot_keywords: Array<{ keyword: string; count: number }>;
+}
+
+export interface DailyBriefResponse {
+  generated_at: string;
+  market_regime: {
+    label: string;
+    adx?: number | null;
+    ema200_slope_pct?: number | null;
+    allowed_setups: string[];
+    reason: string;
+    proxy?: string;
+  };
+  top_signals: {
+    validated: ScanItem[];
+    unvalidated: ScanItem[];
+    rule: string;
+  };
+  strongest_sectors: IntelSectorRow[];
+  weakest_sectors: IntelSectorRow[];
+  top_leaders: Array<{ symbol: string; sector: string; return_20d: number; return_5d: number | null }>;
+  volume_anomalies: VolumeAnomaly[];
+  news_headlines: NewsItem[];
+  ptt_hot: PttHot;
+  cross_source_buzz_with_signal: Array<{ symbol: string; mentions: number }>;
+  disabled_setups: string[];
+  disclosure: string;
+}
+
+export interface PromotionDecision {
+  promoted: boolean;
+  failures: string[];
+  metrics: Record<string, number>;
+}
+
+export interface IntradayResponse {
+  symbol: string;
+  ok: boolean;
+  reason?: string | null;
+  bars_count: number;
+  opening_range_high?: number | null;
+  opening_range_low?: number | null;
+  vwap?: number | null;
+  last_15m_close?: number | null;
+  last_15m_volume?: number | null;
+  cumulative_volume?: number | null;
+  suggested_entry?: number | null;
+  trigger?: string | null;
+  confidence_boost: number;
 }
 
 export interface MoverRow {

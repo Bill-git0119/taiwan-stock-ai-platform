@@ -1,16 +1,19 @@
-"""Strong-stock scanner — runs trade-plan engine across the whole universe
-and ranks the results by an "edge score" so a 短線交易員 can identify the
-day's strongest actionable setups in one query.
+"""Strong-stock scanner — runs the trade-plan engine across the whole universe
+and ranks results by *real* historical edge, not a heuristic.
 
-Edge score (0..100):
-    confidence * 60       — chip + fund + tech composite
-  + min(rr, 4) * 5        — risk-reward
-  + breakout_20 ? 8 : 0
-  + volume_spike up to 8  — clamped (volume_spike-1)*8
-  + foreign_streak * 1.5  — capped at 5
-  + ma_alignment ? 6 : 0
+Ranking (in order of priority):
+    rank = expectancy_R × frequency × current_confidence
 
-This is intentionally simple and transparent — a trader can read the breakdown.
+Where:
+    expectancy_R    = win_rate * avg_win_R - (1 - win_rate) * avg_loss_R
+                       (from edge_signals table over 90 days)
+    frequency       = signals in last 30d / 30  (capped at 1)
+    confidence      = current plan's confidence  (0..1)
+
+When a setup has fewer than WINRATE_MIN_SAMPLES evaluated signals, we fall
+back to a small heuristic prior so the scanner still works on day 1.
+
+Disabled setups (auto-disable from strategy_health) are excluded by default.
 """
 from __future__ import annotations
 
@@ -20,6 +23,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ChipData, DailyPrice, Stock
+from app.services.edge_tracking_service import (
+    SetupStats, WINRATE_MIN_SAMPLES, persist_signal, setup_stats,
+)
+from app.services.strategy_health import disabled_setups
 from app.services.trade_plan_engine import build_plan
 
 
@@ -27,6 +34,8 @@ MIN_BARS = 60
 
 
 def _edge_score(plan_dict: dict) -> float:
+    """Heuristic prior used as the ranking signal until each setup has
+    >= WINRATE_MIN_SAMPLES evaluated trades. Kept for transparency."""
     if plan_dict.get("bias") != "LONG":
         return 0.0
     conf = float(plan_dict.get("confidence") or 0.0)
@@ -44,6 +53,40 @@ def _edge_score(plan_dict: dict) -> float:
     if ind.get("ma_alignment"):
         score += 6
     return round(score, 2)
+
+
+def _rank(plan_dict: dict, stats: SetupStats | None) -> tuple[float, dict]:
+    """Compute new ranking score: expectancy × frequency × confidence.
+
+    Returns (rank, breakdown_dict). When stats is None or sample size is too
+    small, fall back to (edge_score / 100) so the scanner still ranks usefully
+    on day 1.
+    """
+    setup = plan_dict.get("setup")
+    conf = float(plan_dict.get("confidence") or 0.0)
+    if plan_dict.get("bias") != "LONG" or not setup:
+        return 0.0, {"reason": "not_long"}
+    edge_prior = _edge_score(plan_dict) / 100.0
+    if stats is None or stats.sample_size < WINRATE_MIN_SAMPLES:
+        # day-1 fallback — heuristic prior weighted by current confidence
+        rank = edge_prior * conf * 100.0
+        return round(rank, 4), {
+            "mode": "prior",
+            "expectancy": None,
+            "frequency": None,
+            "confidence": round(conf, 4),
+            "sample_size": stats.sample_size if stats else 0,
+        }
+    expectancy = stats.expectancy
+    frequency = min(1.0, stats.last_30d_count / 30.0)
+    rank = expectancy * max(0.05, frequency) * conf * 100.0
+    return round(rank, 4), {
+        "mode": "validated",
+        "expectancy": round(expectancy, 4),
+        "frequency": round(frequency, 4),
+        "confidence": round(conf, 4),
+        "sample_size": stats.sample_size,
+    }
 
 
 async def _bars_for(session: AsyncSession, stock_id: int, limit: int = 240) -> tuple[list[dict], list[dict]]:
@@ -86,16 +129,22 @@ async def scan_universe(
     min_rr: Optional[float] = None,
     min_confidence: Optional[float] = None,
     setup_filter: Optional[str] = None,
+    min_winrate: Optional[float] = None,      # require this setup's hist winrate
+    include_disabled: bool = False,
+    persist: bool = False,                    # write LONG signals to edge_signals
     limit: int = 60,
 ) -> dict:
     """Build a trade plan for every stock with sufficient data, rank by edge."""
+    stats_map = await setup_stats(session)
+    disabled = set() if include_disabled else await disabled_setups(session)
+
     stocks = (await session.execute(select(Stock))).scalars().all()
     rows: List[dict] = []
     for st in stocks:
         bars, chip_records = await _bars_for(session, st.id)
         if len(bars) < MIN_BARS:
             continue
-        plan = build_plan(
+        plan_obj = build_plan(
             symbol=st.symbol,
             closes=[b["close"] for b in bars],
             highs=[b["high"] for b in bars],
@@ -103,10 +152,47 @@ async def scan_universe(
             volumes=[b["volume"] for b in bars],
             chip_records=chip_records,
             fundamental_score=60.0,
-        ).to_dict()
+        )
+        plan = plan_obj.to_dict()
         plan["name"] = st.name
         plan["market"] = st.market
         plan["edge"] = _edge_score(plan)
+
+        # Attach setup stats so the UI can show win-rate / max-loss-streak.
+        setup = plan.get("setup")
+        sstats = stats_map.get(setup) if setup else None
+        plan["stats"] = sstats.to_dict() if sstats else None
+
+        rank, breakdown = _rank(plan, sstats)
+        plan["rank"] = rank
+        plan["rank_breakdown"] = breakdown
+
+        # Signal Validation Layer — every signal must self-report its
+        # validation status. UI / brief use this to decide whether to surface
+        # the signal as actionable vs research-only.
+        from app.services.edge_tracking_service import WINRATE_MIN_SAMPLES
+        if plan.get("bias") == "LONG":
+            if sstats and sstats.sample_size >= WINRATE_MIN_SAMPLES:
+                plan["validation"] = {
+                    "status": "validated",
+                    "win_rate": sstats.win_rate,
+                    "profit_factor": round(
+                        max(0.01, abs(sstats.expectancy + 1)) /
+                        max(0.01, abs(min(0, sstats.expectancy)) + 1), 3,
+                    ),
+                    "max_drawdown_r": sstats.max_consecutive_loss * -1.0,
+                    "expectancy_r": sstats.expectancy,
+                    "sample_size": sstats.sample_size,
+                }
+            else:
+                plan["validation"] = {
+                    "status": "unvalidated",
+                    "reason": f"sample_size<{WINRATE_MIN_SAMPLES}",
+                    "sample_size": sstats.sample_size if sstats else 0,
+                }
+        else:
+            plan["validation"] = {"status": "n/a"}
+
         rows.append(plan)
 
     # Filters
@@ -119,11 +205,38 @@ async def scan_universe(
         out = [r for r in out if (r.get("risk_reward") or 0) >= min_rr]
     if min_confidence is not None:
         out = [r for r in out if (r.get("confidence") or 0) >= min_confidence]
+    if min_winrate is not None:
+        out = [
+            r for r in out
+            if r.get("stats") and r["stats"].get("win_rate", 0) >= min_winrate
+        ]
+    if not include_disabled:
+        out = [r for r in out if r.get("setup") not in disabled]
 
-    out.sort(key=lambda r: (r.get("edge", 0), r.get("confidence", 0)), reverse=True)
+    # New ranking: expectancy × frequency × confidence
+    out.sort(key=lambda r: (r.get("rank", 0), r.get("edge", 0)), reverse=True)
+
+    # Optional: persist today's LONG signals so we can score them in 7 days
+    if persist:
+        from app.services.edge_tracking_service import persist_signal as _persist
+        regime_label = None
+        for r in out:
+            if r.get("bias") != "LONG":
+                continue
+            reg = r.get("regime") or {}
+            regime_label = reg.get("label")
+            await _persist(
+                session,
+                symbol=r["symbol"],
+                setup=r["setup"],
+                plan=r,
+                regime=regime_label,
+            )
+
     return {
         "scanned": len(rows),
         "matched": len(out),
+        "disabled_setups": sorted(disabled),
         "items": out[:limit],
     }
 

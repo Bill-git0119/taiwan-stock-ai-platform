@@ -14,12 +14,16 @@ from app.services.scanner_service import (
 )
 
 
-def _bars_uptrend(n: int = 80, base: float = 100.0) -> list[dict]:
-    """Synthetic clean uptrend with breakout on the final bar."""
+def _bars_uptrend(n: int = 250, base: float = 100.0) -> list[dict]:
+    """Synthetic clean uptrend with breakout on the final bar.
+
+    Long enough (250 bars) for EMA200, ADX(14), and the regime classifier
+    to reliably tag this as `trending_up`.
+    """
     out = []
     px = base
     for i in range(n):
-        px += 0.6 + 0.3 * math.sin(i / 5)
+        px += 0.7 + 0.4 * math.sin(i / 5)
         c = round(px, 2)
         out.append({"open": c - 0.4, "high": c + 0.7, "low": c - 0.7, "close": c, "volume": 800_000})
     # Force last-bar breakout + volume spike
@@ -30,7 +34,7 @@ def _bars_uptrend(n: int = 80, base: float = 100.0) -> list[dict]:
     return out
 
 
-def _bars_flat(n: int = 80, base: float = 50.0) -> list[dict]:
+def _bars_flat(n: int = 250, base: float = 50.0) -> list[dict]:
     return [
         {"open": base, "high": base + 0.2, "low": base - 0.2, "close": base + (i % 2) * 0.05, "volume": 500_000}
         for i in range(n)
@@ -40,7 +44,13 @@ def _bars_flat(n: int = 80, base: float = 50.0) -> list[dict]:
 @pytest_asyncio.fixture
 async def seeded_db():
     """Seed two stocks: 'UP' (clean uptrend) + 'FLAT' (no setup)."""
+    from sqlalchemy import delete, select
     async with async_session_maker() as s:
+        # Hard reset any leftover state from prior tests in the session
+        await s.execute(delete(ChipData))
+        await s.execute(delete(DailyPrice))
+        await s.execute(delete(Stock).where(Stock.symbol.in_(["UPX", "FLATX"])))
+        await s.commit()
         up = Stock(symbol="UPX", name="升勢股", market="TWSE", sector="半導體")
         fl = Stock(symbol="FLATX", name="盤整股", market="TWSE", sector="金融")
         s.add_all([up, fl])
@@ -49,12 +59,14 @@ async def seeded_db():
         await s.refresh(fl)
 
         today = date.today()
-        for i, b in enumerate(_bars_uptrend()):
-            d = today - timedelta(days=80 - i)
+        up_bars = _bars_uptrend()
+        fl_bars = _bars_flat()
+        for i, b in enumerate(up_bars):
+            d = today - timedelta(days=len(up_bars) - i)
             s.add(DailyPrice(stock_id=up.id, date=d, open=b["open"], high=b["high"],
                              low=b["low"], close=b["close"], volume=b["volume"]))
-        for i, b in enumerate(_bars_flat()):
-            d = today - timedelta(days=80 - i)
+        for i, b in enumerate(fl_bars):
+            d = today - timedelta(days=len(fl_bars) - i)
             s.add(DailyPrice(stock_id=fl.id, date=d, open=b["open"], high=b["high"],
                              low=b["low"], close=b["close"], volume=b["volume"]))
         # add chip rows for UPX so foreign_streak triggers
