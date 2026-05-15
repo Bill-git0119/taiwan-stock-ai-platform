@@ -7,15 +7,16 @@ LINE config exists).
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
-    backtest, brief, correlation, datahub, health, intelligence, intraday,
-    leaderboard, market, narrative, performance, persistence, portfolio,
-    quality, research_report, risk, scanner, stocks, strategy_lab,
+    backtest, brief, correlation, datahub, decisions, health, intelligence,
+    intraday, leaderboard, market, narrative, performance, persistence,
+    portfolio, quality, research_report, risk, scanner, stocks, strategy_lab,
     strategy_ranking, stress, trade_plan, universe,
 )
 
 api_router = APIRouter()
 api_router.include_router(health.router, prefix="/health", tags=["health"])
 api_router.include_router(datahub.router, prefix="/datahub", tags=["datahub"])
+api_router.include_router(decisions.router, prefix="/decisions", tags=["decisions"])
 api_router.include_router(stocks.router, prefix="/stocks", tags=["stocks"])
 api_router.include_router(market.router, prefix="/market", tags=["market"])
 api_router.include_router(backtest.router, prefix="/backtest", tags=["backtest"])
