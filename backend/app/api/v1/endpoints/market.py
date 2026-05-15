@@ -10,6 +10,7 @@ from app.db.models import ChipData, DailyPrice, Stock
 from app.db.session import get_db
 from app.services.breadth_service import compute_breadth
 from app.services.cache_service import cached
+from app.services.market_state import compute_market_state
 
 router = APIRouter()
 
@@ -19,6 +20,17 @@ async def market_breadth(session: AsyncSession = Depends(get_db)) -> dict:
     """Market-wide participation snapshot: adv/dec, %>MA, new highs/lows,
     sector heatmap, leaders/laggards. The trader's regime instrument."""
     return await cached("market:breadth", lambda: compute_breadth(session), ttl=180)
+
+
+@router.get("/state")
+async def market_state(session: AsyncSession = Depends(get_db)) -> dict:
+    """Composite market state — regime + breadth + macro fused into a
+    single risk-on score + setup allow-list. The scanner / decision
+    engine gate on this before producing actionable signals."""
+    async def loader():
+        st = await compute_market_state(session)
+        return st.to_dict()
+    return await cached("market:state", loader, ttl=180)
 
 
 class MarketSummary(BaseModel):
