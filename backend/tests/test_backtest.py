@@ -74,14 +74,17 @@ async def test_backtest_ma_breakout_emits_trades():
 
 
 @pytest.mark.asyncio
-async def test_backtest_endpoint_requires_elite(client, auth_headers):
-    headers, _ = auth_headers  # default = free
+async def test_backtest_endpoint_no_paywall_in_local_mode(client, auth_headers):
+    """Phase 1 removed the SaaS paywall — local mode lets every request
+    through (so we only get 400 for missing data, never 402)."""
+    headers, _ = auth_headers
     r = await client.post(
         "/api/v1/backtest/run",
         headers=headers,
-        json={"symbol": "2330", "start": "2025-01-01", "end": "2025-06-01", "strategy": "ai_top_rank"},
+        json={"symbol": "GHOST_2330", "start": "2025-01-01",
+              "end": "2025-06-01", "strategy": "ai_top_rank"},
     )
-    assert r.status_code == 402  # upgrade required
+    assert r.status_code in (200, 400), r.text  # not 402 anymore
 
 
 @pytest.mark.asyncio

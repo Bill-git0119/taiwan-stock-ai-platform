@@ -1,25 +1,24 @@
+"""API router — local research workstation.
+
+Phase 1 removed: auth, billing, admin, referral, blog (public-marketing),
+notify (was tied to user prefs — kept for now, can be re-added once local
+LINE config exists).
+"""
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
-    admin, auth, backtest, billing, blog, brief, correlation, health,
-    intelligence, intraday, leaderboard, market, narrative, notify,
-    performance, persistence, portfolio, quality, referral,
-    research_report, risk, scanner, stocks, strategy_lab,
+    backtest, brief, correlation, health, intelligence, intraday,
+    leaderboard, market, narrative, performance, persistence, portfolio,
+    quality, research_report, risk, scanner, stocks, strategy_lab,
     strategy_ranking, stress, trade_plan, universe,
 )
 
 api_router = APIRouter()
 api_router.include_router(health.router, prefix="/health", tags=["health"])
-api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
-api_router.include_router(billing.router, prefix="/billing", tags=["billing"])
 api_router.include_router(stocks.router, prefix="/stocks", tags=["stocks"])
 api_router.include_router(market.router, prefix="/market", tags=["market"])
-api_router.include_router(notify.router, prefix="/notify", tags=["notify"])
-api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 api_router.include_router(backtest.router, prefix="/backtest", tags=["backtest"])
-api_router.include_router(referral.router, prefix="/referral", tags=["referral"])
 api_router.include_router(leaderboard.router, prefix="/leaderboard", tags=["leaderboard"])
-api_router.include_router(blog.router, prefix="/blog", tags=["blog"])
 api_router.include_router(trade_plan.router, prefix="/trade-plan", tags=["trade-plan"])
 api_router.include_router(scanner.router, prefix="/scanner", tags=["scanner"])
 api_router.include_router(intraday.router, prefix="/intraday", tags=["intraday"])

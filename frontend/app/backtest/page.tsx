@@ -1,17 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { Topbar } from "@/components/layout/Topbar";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { api } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
-interface Strategy { key: string; name: string; description: string; min_plan: string }
+interface Strategy { key: string; name: string; description: string }
 interface EquityPoint { date: string; equity: number }
 interface BacktestRes {
   symbol: string;
@@ -60,7 +58,6 @@ function pct(n: number) {
 }
 
 export default function BacktestPage() {
-  const { user, loading } = useAuth();
   const [strategies, setStrategies] = useState<Strategy[] | null>(null);
   const [symbol, setSymbol] = useState("2330");
   const [start, setStart] = useState("2025-01-01");
@@ -69,27 +66,25 @@ export default function BacktestPage() {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<BacktestRes | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [gated, setGated] = useState(false);
+  const [noData, setNoData] = useState(false);
 
   useEffect(() => {
     api.strategies().then(setStrategies).catch(() => setStrategies([]));
   }, []);
 
   async function run() {
-    setError(null); setGated(false); setResult(null); setRunning(true);
+    setError(null); setNoData(false); setResult(null); setRunning(true);
     try {
       const r = await api.runBacktest({ symbol, start, end, strategy });
       setResult(r as BacktestRes);
     } catch (e) {
-      const err = e as { status?: number; message?: string };
-      if (err.status === 402 || err.status === 403) setGated(true);
+      const err = e as { status?: number; message?: string; payload?: { error?: string } };
+      if (err.payload?.error === "NO_REAL_DATA" || err.status === 400) setNoData(true);
       else setError(err.message || "執行失敗");
     } finally {
       setRunning(false);
     }
   }
-
-  const eliteOnly = !loading && user && user.plan !== "elite" && !user.is_admin;
 
   return (
     <div className="min-h-screen">
@@ -98,22 +93,17 @@ export default function BacktestPage() {
         <header>
           <h1 className="text-2xl font-semibold text-text-bright tracking-tight">回測中心</h1>
           <p className="text-xs text-text-muted mt-1">
-            遵循鐵律：手續費 0.05% / 滑點 0.05% / 停損 5% / R:R 1.3 / 日熔斷 9%
+            遵循鐵律：手續費 0.05% / 滑點 0.05% / 停損 5% / R:R 1.3 / 日熔斷 9% · 真實資料 only
           </p>
         </header>
 
-        {(gated || (!loading && !user)) && (
-          <Card className="border-accent/40 bg-accent/5 p-5 text-sm">
-            <div className="font-semibold text-text-bright mb-1">需要 Elite 方案才能執行回測</div>
+        {noData && (
+          <Card className="border-amber-400/40 bg-amber-400/5 p-5 text-sm">
+            <div className="font-semibold text-text-bright mb-1">沒有真實資料可回測</div>
             <p className="text-text-muted">
-              {user
-                ? "升級到 Elite 方案以解鎖完整回測中心。"
-                : "請先登入並升級到 Elite 方案。"}
+              此標的或區間在資料庫中沒有 OHLCV bars。等盤後資料灌入後再試。
+              系統不會用合成資料偽造回測結果。
             </p>
-            <div className="mt-3 flex gap-2">
-              <Link href="/pricing"><Button>查看方案</Button></Link>
-              {!user && <Link href="/login"><Button variant="secondary">登入</Button></Link>}
-            </div>
           </Card>
         )}
 
@@ -147,7 +137,7 @@ export default function BacktestPage() {
               </select>
             </div>
             <div className="md:col-span-5 flex items-center gap-3 pt-2">
-              <Button onClick={run} disabled={running || !!eliteOnly} size="lg">
+              <Button onClick={run} disabled={running} size="lg">
                 {running ? "回測中…" : "執行回測"}
               </Button>
               {strategy && strategies && (

@@ -7,27 +7,22 @@ from loguru import logger
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.services import scheduler as scheduler_svc
-from app.services.admin_bootstrap import run_admin_bootstrap
 
 settings = get_settings()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Taiwan Stock AI Platform starting up (env={})", settings.app_env)
+    logger.info("Taiwan Stock AI Platform — local research workstation starting (env={})",
+                settings.app_env)
     if settings.scheduler_enabled and settings.app_env != "test":
         try:
             scheduler_svc.start()
         except Exception as e:
             logger.warning("scheduler failed to start: {}", e)
-    if settings.app_env != "test":
-        try:
-            await run_admin_bootstrap()
-        except Exception as e:
-            logger.warning("admin bootstrap failed: {}", e)
     yield
     scheduler_svc.stop()
-    logger.info("Taiwan Stock AI Platform shutting down")
+    logger.info("Local research workstation shutting down")
 
 
 def create_app() -> FastAPI:

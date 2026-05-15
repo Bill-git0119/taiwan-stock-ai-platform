@@ -2,16 +2,17 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_top10_anonymous_is_free_tier(client, seeded_scores):
+async def test_top10_local_returns_elite_tier(client, seeded_scores):
+    """Phase 1: local single-user mode always serves Elite tier (30 items)."""
     from app.services.cache_service import cache
     await cache.delete("stocks:top30")
     r = await client.get("/api/v1/stocks/top10")
     assert r.status_code == 200
     body = r.json()
     assert "items" in body and "tier" in body
-    assert body["tier"]["plan"] == "free"
-    assert body["tier"]["limit"] == 3
-    assert len(body["items"]) == 3
+    assert body["tier"]["plan"] == "elite"
+    assert body["tier"]["limit"] == 30
+    assert len(body["items"]) == 30
     scores = [i["total_score"] for i in body["items"]]
     assert scores == sorted(scores, reverse=True)
 
@@ -20,7 +21,7 @@ async def test_top10_anonymous_is_free_tier(client, seeded_scores):
 async def test_top10_shortcut(client):
     r = await client.get("/api/v1/top10")
     assert r.status_code == 200
-    assert r.json()["tier"]["plan"] == "free"
+    assert r.json()["tier"]["plan"] == "elite"
 
 
 @pytest.mark.asyncio

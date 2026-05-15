@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Lock, ArrowUpRight, TrendingUp, Target } from "lucide-react";
+import { TrendingUp, Target } from "lucide-react";
 import { api, type ScanItem, type ScanResponse, type Top10Response } from "@/lib/api";
 import { cn, fmtScore } from "@/lib/utils";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -107,25 +107,7 @@ export function Top10Table() {
         </table>
       </div>
 
-      {tier && tier.upgrade_message && (
-        <Link
-          href="/pricing"
-          className="flex items-center justify-between gap-4 px-5 py-4 border-t border-line bg-accent/5 hover:bg-accent/10 transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            <Lock className="w-4 h-4 text-accent" />
-            <div>
-              <div className="text-sm text-text-bright">{tier.upgrade_message}</div>
-              <div className="text-[11px] text-text-muted mt-0.5">
-                目前方案: {PLAN_LABEL[tier.plan]} · 已隱藏 {tier.total_available - tier.showing} 檔
-              </div>
-            </div>
-          </div>
-          <span className="flex items-center gap-1 text-sm text-accent mono">
-            升級方案 <ArrowUpRight className="w-4 h-4" />
-          </span>
-        </Link>
-      )}
+      {/* Local mode: no upgrade prompts. Tier is always Elite. */}
     </Card>
   );
 }

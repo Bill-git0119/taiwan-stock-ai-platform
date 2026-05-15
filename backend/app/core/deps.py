@@ -1,85 +1,71 @@
-"""FastAPI dependency: identity, plan tier, admin."""
+"""Local single-user dependencies.
+
+Phase 1 removed the SaaS surface area (auth / pricing / admin / billing).
+What used to be a JWT-gated multi-tenant system is now a local research
+workstation, so every "current_user" call returns the same hardcoded
+Elite user and every plan check is a no-op.
+
+We keep the function signatures (current_user / require_plan / etc.) so
+endpoints that imported them still work without rewrites — they just
+never block anyone.
+"""
 from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import decode_token
 from app.db.models import Plan, User
 from app.db.session import get_db
 
-
-def _bearer_token(request: Request) -> Optional[str]:
-    h = request.headers.get("Authorization") or ""
-    if h.lower().startswith("bearer "):
-        return h.split(" ", 1)[1].strip() or None
-    return None
+LOCAL_USER_EMAIL = "local@workstation"
+LOCAL_USER_NAME = "Local Research User"
 
 
-async def current_user_optional(
-    request: Request, session: AsyncSession = Depends(get_db)
-) -> Optional[User]:
-    token = _bearer_token(request)
-    if not token:
-        return None
-    try:
-        payload = decode_token(token)
-        uid = int(payload.get("sub", 0))
-    except Exception:
-        return None
-    if not uid:
-        return None
-    res = await session.execute(select(User).where(User.id == uid))
+async def _get_or_create_local_user(session: AsyncSession) -> User:
+    res = await session.execute(select(User).where(User.email == LOCAL_USER_EMAIL))
     user = res.scalar_one_or_none()
-    if user is None or not user.is_active:
-        return None
-    return user
-
-
-async def current_user(
-    user: Optional[User] = Depends(current_user_optional),
-) -> User:
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not authenticated")
+        user = User(
+            email=LOCAL_USER_EMAIL,
+            name=LOCAL_USER_NAME,
+            password_hash="",
+            plan=Plan.ELITE,
+            is_admin=True,
+            is_active=True,
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
     return user
 
 
-async def admin_user(user: User = Depends(current_user)) -> User:
-    if not user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin required")
-    return user
+async def current_user_optional(session: AsyncSession = Depends(get_db)) -> Optional[User]:
+    return await _get_or_create_local_user(session)
 
 
-def plan_of(user: Optional[User]) -> str:
-    return user.plan if (user and user.plan in Plan.ALL) else Plan.FREE
+async def current_user(session: AsyncSession = Depends(get_db)) -> User:
+    return await _get_or_create_local_user(session)
 
 
-def top_n_for(user: Optional[User]) -> int:
-    return Plan.LIMIT.get(plan_of(user), Plan.LIMIT[Plan.FREE])
+async def admin_user(session: AsyncSession = Depends(get_db)) -> User:
+    return await _get_or_create_local_user(session)
 
 
-def require_plan(min_plan: str):
-    """Dependency factory: raise 402 with upgrade prompt if user under tier."""
+def plan_of(_user: Optional[User] = None) -> str:
+    return Plan.ELITE
 
-    async def _dep(user: Optional[User] = Depends(current_user_optional)) -> User:
-        cur = plan_of(user)
-        if not Plan.at_least(cur, min_plan):
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail={
-                    "error": "upgrade_required",
-                    "current_plan": cur,
-                    "required_plan": min_plan,
-                    "message": f"此功能需 {min_plan.upper()} 方案，請升級。",
-                    "upgrade_url": "/pricing",
-                },
-            )
-        # user could still be None if the endpoint allows guest+free
-        if user is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="login required")
-        return user
+
+def top_n_for(_user: Optional[User] = None) -> int:
+    return Plan.LIMIT.get(Plan.ELITE, 30)
+
+
+def require_plan(_min_plan: str):
+    """No-op gate — Phase 1 is local single-user mode."""
+
+    async def _dep(session: AsyncSession = Depends(get_db)) -> User:
+        return await _get_or_create_local_user(session)
 
     return _dep

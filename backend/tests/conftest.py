@@ -88,35 +88,16 @@ async def seeded_scores():
 
 @pytest_asyncio.fixture
 async def auth_headers(client):
-    """Create a fresh free-tier user and return Bearer-token headers."""
-    import uuid
-    email = f"u{uuid.uuid4().hex[:10]}@test.io"
-    r = await client.post("/api/v1/auth/register", json={
-        "email": email, "password": "Sup3rSecret!", "name": "T",
-    })
-    assert r.status_code == 201, r.text
-    token = r.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}, email
+    """Backwards-compatible no-op headers — local mode has no auth.
+
+    Returns a (headers, email) tuple so existing tests that unpack don't
+    have to change. The headers are empty because endpoints no longer gate
+    on bearer tokens; deps.current_user_optional returns a hardcoded
+    local Elite user regardless."""
+    return {}, "local@workstation"
 
 
 @pytest_asyncio.fixture
 async def admin_headers(client):
-    """Create an admin user via DB direct write and return Bearer headers."""
-    import uuid
-
-    from sqlalchemy import select
-
-    from app.core.security import create_access_token, hash_password
-    from app.db.models import User
-
-    email = f"admin{uuid.uuid4().hex[:6]}@test.io"
-    async with async_session_maker() as s:
-        u = User(
-            email=email, name="admin", password_hash=hash_password("Adm!nPass1"),
-            plan="elite", is_admin=True, is_active=True,
-        )
-        s.add(u)
-        await s.commit()
-        await s.refresh(u)
-    token = create_access_token(u.id, {"plan": u.plan, "admin": True})
-    return {"Authorization": f"Bearer {token}"}
+    """No-op headers — every local-mode user is admin/Elite."""
+    return {}
