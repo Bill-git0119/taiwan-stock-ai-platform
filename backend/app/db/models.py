@@ -326,3 +326,42 @@ class NotificationLog(Base):
     success: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[Optional[str]] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+
+
+# ───────────────── Phase 2: datahub freshness + integrity ─────────────────
+
+class DataFreshness(Base):
+    """Latest observed timestamp for each data source.
+
+    The collector writes here every successful pull. The UI / scheduler
+    reads it to surface "資料日 YYYY-MM-DD" and to skip sources whose
+    latest data is already current."""
+    __tablename__ = "data_freshness"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # e.g. "yfinance.daily"
+    latest_data_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    last_attempted_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    last_succeeded_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    rows_last_run: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[Optional[str]] = mapped_column(Text)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class DataIntegrityReport(Base):
+    """Result of an integrity check run (e.g. missing-bar audit).
+
+    Severity ∈ ok | warn | fail. UI red flag if any 'fail' rows in
+    last 24 hours."""
+    __tablename__ = "data_integrity_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(64), index=True)
+    check_name: Mapped[str] = mapped_column(String(64))  # e.g. "missing_bars_gt_10"
+    severity: Mapped[str] = mapped_column(String(8))     # ok / warn / fail
+    affected_symbols: Mapped[int] = mapped_column(Integer, default=0)
+    detail: Mapped[Optional[str]] = mapped_column(Text)  # JSON-encoded
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
