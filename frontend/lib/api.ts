@@ -40,6 +40,96 @@ export interface MarketSummary {
   losers: number;
 }
 
+export interface MarketStateResponse {
+  regime: string;
+  confidence: number;
+  risk_level: "low" | "normal" | "elevated" | "high";
+  risk_on_score: number;
+  exposure_mult: number;
+  allowed_setups: string[];
+  forbidden_setups: string[];
+  reasons: string[];
+  breadth_hint?: string | null;
+  macro: Record<string, { last?: number; d1_pct?: number; realized_vol_20d?: number }>;
+  breadth_summary?: any;
+}
+
+export interface DatahubSource {
+  source: string;
+  latest_data_at: string | null;
+  last_attempted_at: string | null;
+  last_succeeded_at: string | null;
+  consecutive_failures: number;
+  rows_last_run: number;
+  last_error: string | null;
+  age_hours: number | null;
+  severity: "ok" | "warn" | "fail";
+}
+export interface DatahubFreshness { as_of: string; sources: DatahubSource[] }
+export interface DatahubReport {
+  source: string; check_name: string; severity: string;
+  affected_symbols: number; detail: string | null; created_at: string;
+}
+
+export interface ShortTermDecision {
+  symbol: string;
+  name: string;
+  bias: string;
+  setup: string | null;
+  confidence: number;
+  rank: number;
+  adaptive_score: number;
+  entry_zone: number[] | null;
+  stop_loss: number | null;
+  take_profit: number[] | null;
+  risk_reward: number | null;
+  atr: number | null;
+  sector: string | null;
+  sector_rank: number | null;
+  rs_5d: number | null;
+  ret_5d: number | null;
+  rel_volume: number | null;
+  regime: string | null;
+  production_status: string | null;
+  as_of: string | null;
+  actionable: boolean;
+  invalidation_reason: string | null;
+  exposure_mult: number;
+  catalyst: string | null;
+  why_now: string[];
+  holding_days_max: number;
+  risk_score: number;
+}
+export interface DecisionsResponse {
+  as_of: string | null;
+  market_state: MarketStateResponse;
+  actionable_count: number;
+  research_count: number;
+  decisions: ShortTermDecision[];
+}
+
+export interface LongCandidate {
+  symbol: string; name: string; sector: string | null;
+  bucket: string; score: number;
+  chip_score: number; fundamental_score: number; technical_score: number;
+  last: number | null; ret_60d: number | null; ret_240d: number | null;
+  foreign_net_30d: number | null; institutional_aligned_days: number;
+  reasons: string[]; flags: string[];
+}
+export interface LongTermResponse {
+  fundamentals_wired: boolean;
+  warning: string | null;
+  counts: Record<string, number>;
+  buckets: Record<string, LongCandidate[]>;
+}
+
+export interface NarrativeResponse {
+  markdown: string;
+  provider: "anthropic" | "openai" | "stub";
+  generated_at: string;
+  facts_used: any;
+}
+
 export interface MarketBreadth {
   as_of: string | null;
   universe_size: number;
@@ -105,6 +195,24 @@ export const api = {
   stock: (symbol: string) => request<StockDetail>(`/api/v1/stocks/${encodeURIComponent(symbol)}`),
   marketSummary: () => request<MarketSummary>("/api/v1/market/summary"),
   marketBreadth: () => request<MarketBreadth>("/api/v1/market/breadth"),
+  marketState: () => request<MarketStateResponse>("/api/v1/market/state"),
+
+  // local research workstation (Phase 2-7 APIs)
+  datahubFreshness: () => request<DatahubFreshness>("/api/v1/datahub/freshness"),
+  datahubIntegrity: () => request<{ reports: DatahubReport[] }>("/api/v1/datahub/integrity"),
+  datahubMacro: () => request<{ has_data: boolean; snapshot: Record<string, any> | null }>("/api/v1/datahub/macro"),
+  runDatahub: (source: string) => request<{ source: string; rows: number; latest_data_at: string | null; note: string | null }>(
+    `/api/v1/datahub/run/${encodeURIComponent(source)}`, { method: "POST" }
+  ),
+  shortTermDecisions: (params?: { limit?: number; include_research?: boolean }) => {
+    const q = new URLSearchParams();
+    if (params?.limit !== undefined) q.set("limit", String(params.limit));
+    if (params?.include_research !== undefined) q.set("include_research", String(params.include_research));
+    const s = q.toString();
+    return request<DecisionsResponse>(`/api/v1/decisions/short-term${s ? `?${s}` : ""}`);
+  },
+  longTermBuckets: () => request<LongTermResponse>("/api/v1/long-term/buckets"),
+  dailyBrief: () => request<NarrativeResponse>("/api/v1/narrative-v2/daily-brief"),
 
   // backtest
   strategies: () =>

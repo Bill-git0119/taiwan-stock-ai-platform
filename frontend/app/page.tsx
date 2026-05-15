@@ -11,6 +11,12 @@ export const metadata = {
 
 const ENTRY_POINTS = [
   {
+    href: "/workspace",
+    icon: Brain,
+    title: "🖥️ Workspace (主控台)",
+    desc: "市場狀態 + 決策 + 長線分流 + LLM brief 一頁集中",
+  },
+  {
     href: "/terminal",
     icon: Brain,
     title: "AI Trading Terminal",

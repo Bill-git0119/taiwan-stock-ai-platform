@@ -21,9 +21,10 @@ export function Topbar() {
           </div>
         </Link>
         <nav className="hidden md:flex items-center gap-5 text-sm text-text-muted">
+          <Link href="/workspace" className="hover:text-accent font-bold text-text-bright">🖥️ Workspace</Link>
           <Link href="/terminal" className="hover:text-accent font-medium text-text-bright">🧠 Terminal</Link>
-          <Link href="/dashboard" className="hover:text-text-bright">Dashboard</Link>
           <Link href="/scanner" className="hover:text-accent font-medium text-text-bright">⚡ Scanner</Link>
+          <Link href="/dashboard" className="hover:text-text-bright">Dashboard</Link>
           <Link href="/leaderboard" className="hover:text-text-bright">Leaderboard</Link>
           <Link href="/backtest" className="hover:text-text-bright">Backtest</Link>
         </nav>
