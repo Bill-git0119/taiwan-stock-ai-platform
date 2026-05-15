@@ -12,14 +12,24 @@ Composite score:
          + 0.15 * (1 - max(0, -decay))      # decay penalises
          + 0.10 * normalize(mc_p05_ratio)
 
-Production gate (any failure → DISABLED):
-    sample_size       < 30
-    OOS profit_factor < 1.2
-    MC profitable     < 55%
-    live expectancy   < 0
-    max consec loss   > 8
+Production gate (Phase 4 — hardened to local-mode iron rules):
+    sample_size            < 100          → DISABLED
+    OOS profit_factor      < 1.3          → DISABLED
+    OOS Sharpe             < 1.0          → DISABLED
+    Max DD (R units)       < -25          → DISABLED
+    MC profitable          < 65%          → DISABLED
+    Regime consistency     < 60%          → DISABLED
+    live expectancy        < 0            → DISABLED
+    max consec loss        > 8            → DISABLED
 
-Below DISABLED but above ACTIVE → WATCH.
+Plus a composite research_quality.evaluate() check that fuses
+correlation health, edge decay, robustness validator score and
+single-period-dominance into one production_research_score (0..1).
+A setup must clear BOTH the heuristic gate AND the research_quality
+gate; the final production_status is the MORE conservative verdict.
+
+WATCH = one heuristic failure but sample >= min/2.
+UNKNOWN = no live data AND no lab run.
 """
 from __future__ import annotations
 
@@ -30,13 +40,19 @@ from typing import Dict, List
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.edge import edge_decay, strategy_metrics
+from app.strategy_registry import research_quality
 
 
+# Hardened gate — Phase 4 brings these in line with the local-mode iron rules.
+# Anything that doesn't clear ALL of these is non-tradeable.
 GATE = {
-    "min_sample_size": 30,
-    "min_oos_pf": 1.2,
-    "min_mc_profitable": 0.55,
-    "max_consec_loss": 8,
+    "min_sample_size":      100,    # was 30
+    "min_oos_pf":           1.3,    # was 1.2
+    "min_oos_sharpe":       1.0,    # new
+    "max_drawdown_r":      -25.0,   # new — minimum allowed maxDD in R units
+    "min_mc_profitable":    0.65,   # was 0.55
+    "min_regime_consist":   0.60,   # new — cross-regime consistency
+    "max_consec_loss":      8,
 }
 
 
@@ -100,10 +116,8 @@ async def rank_all(session: AsyncSession,
             0.10 * _norm(mc_p05_ratio, 0.9, 1.5)
         )
 
-        # Production gate
+        # ── Production gate (Phase 4 hardened) ─────────────────────
         failures: List[str] = []
-        # If we don't have enough samples, status is UNKNOWN unless lab metrics
-        # are present. Without samples AND no lab → cannot promote.
         if sample == 0 and not s_lab:
             failures.append("no live data, no lab run")
         else:
@@ -113,21 +127,61 @@ async def rank_all(session: AsyncSession,
                 failures.append(f"live_pf={live_pf:.2f}<{GATE['min_oos_pf']}")
             if s_lab and oos_pf < GATE["min_oos_pf"]:
                 failures.append(f"oos_pf={oos_pf:.2f}<{GATE['min_oos_pf']}")
+            if s_lab and oos_sharpe < GATE["min_oos_sharpe"]:
+                failures.append(f"oos_sharpe={oos_sharpe:.2f}<{GATE['min_oos_sharpe']}")
             if s_lab and mc_profitable < GATE["min_mc_profitable"]:
                 failures.append(f"mc_profitable={mc_profitable:.2f}<{GATE['min_mc_profitable']}")
             if sample > 0 and live_exp < 0:
                 failures.append(f"live_expectancy={live_exp:.2f}<0")
             if consec > GATE["max_consec_loss"]:
                 failures.append(f"max_consec_loss={consec}>{GATE['max_consec_loss']}")
+            # MaxDD in R-units — only available from lab data, optional
+            mdd_r = s_lab.get("max_drawdown_r")
+            if mdd_r is not None and mdd_r < GATE["max_drawdown_r"]:
+                failures.append(f"max_drawdown_r={mdd_r:.1f}<{GATE['max_drawdown_r']}")
 
+        # ── Research quality (composite robustness) gate ───────────
+        regime_consistency = s_lab.get("cross_regime_consistency",
+                                       s_dec.get("cross_regime_consistency", 0.0))
+        spd = s_lab.get("single_period_dominance", 0.0)
+        corr_flagged = bool(s_lab.get("correlation_flagged", False))
+        decay_label = s_dec.get("label")
+        robustness_score = s_lab.get("robustness_score", 0.0)
+
+        verdict = research_quality.evaluate(
+            setup,
+            sample_size=sample,
+            cross_regime_consistency=regime_consistency,
+            single_period_dominance=spd,
+            correlation_flagged=corr_flagged,
+            decay_label=decay_label,
+            robustness_score=robustness_score,
+        )
+
+        # Cross-regime consistency hard gate (independent from research_quality)
+        if s_lab and regime_consistency > 0 and regime_consistency < GATE["min_regime_consist"]:
+            failures.append(
+                f"regime_consistency={regime_consistency:.2f}<{GATE['min_regime_consist']}"
+            )
+
+        # ── Combine the two gates: be the MORE conservative ───────
         if not failures:
-            status = "ACTIVE"
+            heur_status = "ACTIVE"
         elif sample == 0 and not s_lab:
-            status = "UNKNOWN"
+            heur_status = "UNKNOWN"
         elif len(failures) <= 1 and sample >= GATE["min_sample_size"] / 2:
-            status = "WATCH"
+            heur_status = "WATCH"
         else:
-            status = "DISABLED"
+            heur_status = "DISABLED"
+
+        research_status = verdict.research_status  # ACTIVE / RESEARCH_ONLY / DISABLED
+        # Severity ranking — lowest wins (most conservative)
+        rank_order = {"ACTIVE": 3, "WATCH": 2, "RESEARCH_ONLY": 1,
+                      "DISABLED": 0, "UNKNOWN": 1}
+        if rank_order.get(research_status, 1) < rank_order.get(heur_status, 0):
+            status = research_status if research_status != "RESEARCH_ONLY" else "WATCH"
+        else:
+            status = heur_status
 
         out.append(StrategyRank(
             strategy=setup,
@@ -141,8 +195,13 @@ async def rank_all(session: AsyncSession,
                 "mc_p05_ratio": mc_p05_ratio,
                 "mc_profitable": mc_profitable,
                 "decay": decay_val,
+                "decay_label": decay_label,
                 "sample_size": sample,
                 "max_consec_loss": consec,
+                "regime_consistency": regime_consistency,
+                "research_quality_score": verdict.production_research_score,
+                "research_status": verdict.research_status,
+                "heur_status": heur_status,
             },
             failures=failures,
         ))
