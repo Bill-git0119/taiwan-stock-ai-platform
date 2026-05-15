@@ -56,40 +56,8 @@ class StockDetail(BaseModel):
     prices: List[PricePoint] = []
 
 
-# ───────── mock fallback (first run, before collector populates DB) ─────────
-
-_MOCK_TOP30: List[StockScore] = [
-    StockScore(symbol="2330", name="台積電",   chip_score=92, fundamental_score=95, technical_score=88, total_score=92.15, reason="外資連買5日 + ROE 28% + MA多頭排列"),
-    StockScore(symbol="2454", name="聯發科",   chip_score=86, fundamental_score=90, technical_score=82, total_score=86.40, reason="外資連買3日 + EPS+35% + MACD金叉"),
-    StockScore(symbol="2317", name="鴻海",     chip_score=84, fundamental_score=78, technical_score=85, total_score=82.15, reason="量能放大1.8x + 突破20日高"),
-    StockScore(symbol="2303", name="聯電",     chip_score=80, fundamental_score=72, technical_score=83, total_score=77.95, reason="外資連買2日 + MA多頭排列"),
-    StockScore(symbol="3008", name="大立光",   chip_score=75, fundamental_score=85, technical_score=78, total_score=79.25, reason="ROE 22% + EPS+28%"),
-    StockScore(symbol="2308", name="台達電",   chip_score=78, fundamental_score=80, technical_score=72, total_score=77.20, reason="投信連買3日 + MACD金叉"),
-    StockScore(symbol="2881", name="富邦金",   chip_score=72, fundamental_score=73, technical_score=68, total_score=71.45, reason="外資連買3日 + 量能放大"),
-    StockScore(symbol="2882", name="國泰金",   chip_score=70, fundamental_score=74, technical_score=66, total_score=70.40, reason="投信連買2日"),
-    StockScore(symbol="2603", name="長榮",     chip_score=78, fundamental_score=65, technical_score=82, total_score=74.65, reason="量能放大2.1x + 突破20日高"),
-    StockScore(symbol="2412", name="中華電",   chip_score=70, fundamental_score=80, technical_score=65, total_score=72.25, reason="ROE 15% + 穩健"),
-    StockScore(symbol="1216", name="統一",     chip_score=66, fundamental_score=78, technical_score=62, total_score=69.30, reason="ROE 18%"),
-    StockScore(symbol="2891", name="中信金",   chip_score=68, fundamental_score=72, technical_score=64, total_score=68.40, reason="外資連買2日"),
-    StockScore(symbol="2002", name="中鋼",     chip_score=62, fundamental_score=58, technical_score=72, total_score=63.10, reason="MACD金叉"),
-    StockScore(symbol="2207", name="和泰車",   chip_score=64, fundamental_score=82, technical_score=58, total_score=68.40, reason="ROE 20%"),
-    StockScore(symbol="2884", name="玉山金",   chip_score=68, fundamental_score=70, technical_score=60, total_score=66.20, reason="投信連買2日"),
-    StockScore(symbol="2885", name="元大金",   chip_score=66, fundamental_score=68, technical_score=58, total_score=64.50, reason="量能放大"),
-    StockScore(symbol="2886", name="兆豐金",   chip_score=64, fundamental_score=72, technical_score=56, total_score=64.40, reason="ROE 14%"),
-    StockScore(symbol="2890", name="永豐金",   chip_score=62, fundamental_score=68, technical_score=54, total_score=61.50, reason="—"),
-    StockScore(symbol="2615", name="萬海",     chip_score=70, fundamental_score=58, technical_score=76, total_score=68.30, reason="MA多頭排列"),
-    StockScore(symbol="2609", name="陽明",     chip_score=68, fundamental_score=55, technical_score=74, total_score=65.95, reason="量能放大"),
-    StockScore(symbol="3034", name="聯詠",     chip_score=72, fundamental_score=80, technical_score=66, total_score=72.30, reason="ROE 22% + EPS+24%"),
-    StockScore(symbol="3711", name="日月光投控", chip_score=70, fundamental_score=72, technical_score=68, total_score=70.20, reason="外資連買2日"),
-    StockScore(symbol="2379", name="瑞昱",     chip_score=68, fundamental_score=78, technical_score=62, total_score=70.10, reason="EPS+30%"),
-    StockScore(symbol="2382", name="廣達",     chip_score=82, fundamental_score=72, technical_score=78, total_score=78.10, reason="外資連買4日 + AI 概念"),
-    StockScore(symbol="2357", name="華碩",     chip_score=66, fundamental_score=70, technical_score=64, total_score=66.90, reason="—"),
-    StockScore(symbol="2353", name="宏碁",     chip_score=60, fundamental_score=62, technical_score=58, total_score=60.20, reason="—"),
-    StockScore(symbol="3231", name="緯創",     chip_score=78, fundamental_score=68, technical_score=80, total_score=75.00, reason="量能放大1.6x + AI 受惠"),
-    StockScore(symbol="2376", name="技嘉",     chip_score=72, fundamental_score=70, technical_score=74, total_score=71.80, reason="MACD金叉"),
-    StockScore(symbol="6505", name="台塑化",   chip_score=58, fundamental_score=64, technical_score=52, total_score=58.40, reason="—"),
-    StockScore(symbol="1303", name="南亞",     chip_score=56, fundamental_score=62, technical_score=50, total_score=56.10, reason="—"),
-]
+# Note: mock fallback removed. Iron rule: empty DB ⇒ empty response, not
+# fabricated stocks. The collector must populate `scores` for top10 to work.
 
 
 def _build_tier(rows: List[StockScore], user: Optional[User]) -> Top10Response:
@@ -114,12 +82,10 @@ def _build_tier(rows: List[StockScore], user: Optional[User]) -> Top10Response:
 # ───────── endpoints ─────────
 
 async def _resolve_top30(session: AsyncSession) -> List[StockScore]:
+    """Real top-30 from persisted scores. No mock fallback — empty DB returns
+    an empty list so the UI can show an honest "資料尚未灌入" state."""
     async def loader():
-        rows = await load_top_n(session, n=30)
-        if rows:
-            return rows
-        # Fallback while collector hasn't run yet.
-        return [s.model_dump() for s in sorted(_MOCK_TOP30, key=lambda s: s.total_score, reverse=True)]
+        return await load_top_n(session, n=30)
     cached_rows = await cached("stocks:top30", loader, ttl=60)
     return [StockScore(**r) for r in cached_rows]
 
@@ -138,10 +104,7 @@ async def get_stock(symbol: str, session: AsyncSession = Depends(get_db)) -> Sto
     result = await session.execute(select(Stock).where(Stock.symbol == symbol))
     stock = result.scalar_one_or_none()
     if stock is None:
-        mock = next((m for m in _MOCK_TOP30 if m.symbol == symbol), None)
-        if mock is None:
-            raise HTTPException(status_code=404, detail=f"stock {symbol} not found")
-        return StockDetail(symbol=mock.symbol, name=mock.name, market="TWSE", latest_score=mock, prices=[])
+        raise HTTPException(status_code=404, detail=f"stock {symbol} not found")
 
     prices = (
         await session.execute(

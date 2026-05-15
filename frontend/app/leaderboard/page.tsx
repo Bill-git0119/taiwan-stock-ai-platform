@@ -16,13 +16,24 @@ interface Item {
   date: string;
 }
 
+interface LbStatus {
+  total_picks_tracked: number;
+  tracking_started_at: string | null;
+  latest_pick_at: string | null;
+  has_data: boolean;
+}
+
 export default function LeaderboardPage() {
   const [items, setItems] = useState<Item[] | null>(null);
+  const [status, setStatus] = useState<LbStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api.leaderboardWeekly()
-      .then((r) => setItems(r.items))
+      .then((r) => {
+        setItems(r.items);
+        if ("status" in r) setStatus((r as { status: LbStatus }).status);
+      })
       .catch((e) => setError(e instanceof Error ? e.message : "fetch failed"));
   }, []);
 
@@ -73,7 +84,18 @@ export default function LeaderboardPage() {
                     </tr>
                   ))}
                   {items.length === 0 && (
-                    <tr><td colSpan={6} className="px-3 py-6 text-center text-text-muted">暫無資料</td></tr>
+                    <tr>
+                      <td colSpan={6} className="px-3 py-8 text-center text-text-muted">
+                        <div className="text-sm text-text-bright mb-1">尚無已 evaluate 的 picks</div>
+                        <div className="text-[11px]">
+                          {status?.tracking_started_at
+                            ? <>追蹤中：{status.total_picks_tracked} 筆 picks · 自 {status.tracking_started_at} 起記錄，需要 7 個交易日才能算出報酬。</>
+                            : <>尚未開始 pick 追蹤。每日盤後排程啟動後會自動寫入。</>}
+                          <br />
+                          <span className="text-[10px] italic">本榜不會偽造績效。空欄 = 沒資料。</span>
+                        </div>
+                      </td>
+                    </tr>
                   )}
                 </tbody>
               </table>

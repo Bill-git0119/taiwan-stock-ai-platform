@@ -48,15 +48,22 @@ async def _load_real_bars(
             select(ChipData)
             .where(ChipData.stock_id == stock.id)
             .order_by(ChipData.date.asc())
-            .limit(60)
+            .limit(limit)
         )
     ).scalars().all()
-    chip_records = [{
-        "foreign_buy": float(c.foreign_buy or 0),
-        "investment_buy": float(c.investment_buy or 0),
-        "dealer_buy": float(c.dealer_buy or 0),
-        "volume": int(rows[i].volume) if i < len(rows) else 0,
-    } for i, c in enumerate(chip_rows)]
+    # Date-keyed alignment (iron rule — never align chips to bars by index).
+    chip_by_date = {str(c.date): c for c in chip_rows}
+    chip_records: list[dict] = []
+    for r in rows:
+        c = chip_by_date.get(str(r.date))
+        chip_records.append({
+            "date": str(r.date),
+            "foreign_buy": float(c.foreign_buy or 0) if c else 0.0,
+            "investment_buy": float(c.investment_buy or 0) if c else 0.0,
+            "dealer_buy": float(c.dealer_buy or 0) if c else 0.0,
+            "volume": int(r.volume or 0),
+            "chip_available": c is not None,
+        })
     return bars, chip_records
 
 

@@ -65,8 +65,8 @@ async def generate_today_top10(session: AsyncSession, slug: Optional[str] = None
         return existing
     rows = await load_top_n(session, n=10)
     if not rows:
-        from app.api.v1.endpoints.stocks import _MOCK_TOP30
-        rows = [s.model_dump() for s in sorted(_MOCK_TOP30, key=lambda s: s.total_score, reverse=True)[:10]]
+        # Iron rule: never fabricate. Skip generation entirely.
+        raise RuntimeError("cannot generate today_top10 blog — scores table empty")
     today = datetime.utcnow().strftime("%Y-%m-%d")
     title = f"{today} 今日 AI 台股 TOP 10 強勢股"
     lines = ["# " + title, "", f"_由 Taiwan Stock AI 自動生成 · 更新時間 {today}_", ""]

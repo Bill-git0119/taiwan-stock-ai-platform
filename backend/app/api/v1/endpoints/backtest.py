@@ -1,14 +1,14 @@
-from datetime import date, timedelta
+from datetime import date
 from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import require_plan
 from app.db.models import Plan, User
 from app.db.session import get_db
-from app.services.backtest_service import run_backtest
+from app.services.backtest_service import NoRealDataError, run_backtest
 from ai_engine.predictor import predict
 from sqlalchemy import select
 from app.db.models import DailyPrice, Stock
@@ -31,7 +31,13 @@ async def run_bt(
     user: User = Depends(require_plan(Plan.ELITE)),  # Elite-only
     session: AsyncSession = Depends(get_db),
 ):
-    res = await run_backtest(session, body.symbol, body.start, body.end, body.strategy)
+    try:
+        res = await run_backtest(session, body.symbol, body.start, body.end, body.strategy)
+    except NoRealDataError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "NO_REAL_DATA", "message": str(e), "symbol": body.symbol},
+        ) from e
     return res.to_dict()
 
 
@@ -58,12 +64,17 @@ async def predict_symbol(
             .order_by(DailyPrice.date.desc()).limit(120)
         )).scalars().all()
         closes = [float(r.close) for r in reversed(rows)]
-    if not closes:
-        # fallback synthetic
-        from app.services.backtest_service import _make_synthetic_prices
-        end = date.today()
-        ts = _make_synthetic_prices(end - timedelta(days=120), end)
-        closes = [p[1] for p in ts]
+    if not closes or len(closes) < 30:
+        # Iron rule: never substitute synthetic data. Tell the caller.
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "NO_REAL_DATA",
+                "symbol": symbol,
+                "bars_available": len(closes),
+                "bars_required": 30,
+            },
+        )
     p = predict(symbol, closes)
     if not p:
         return {"symbol": symbol, "error": "insufficient_data"}

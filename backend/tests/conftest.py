@@ -49,6 +49,44 @@ async def session():
 
 
 @pytest_asyncio.fixture
+async def seeded_scores():
+    """Insert 30 real Stock+Score rows for tests that exercise tier limits.
+
+    Mock fallback was removed (P0 audit) — tests that previously relied on
+    `_MOCK_TOP30` must seed their own data here. Always reseeds today's
+    scores so the order in which other tests run doesn't matter, and clears
+    the top30 cache so the fresh rows are visible immediately."""
+    from datetime import date
+
+    from sqlalchemy import select
+
+    from app.db.models import Score, Stock
+    from app.services.cache_service import cache
+
+    async with async_session_maker() as s:
+        today = date.today()
+        for i in range(30):
+            sym = f"SEED{i:04d}"
+            stk = (await s.execute(select(Stock).where(Stock.symbol == sym))).scalar_one_or_none()
+            if stk is None:
+                stk = Stock(symbol=sym, name=f"測試{i}", market="TWSE")
+                s.add(stk)
+                await s.flush()
+            score = 95 - i
+            existing_score = (await s.execute(
+                select(Score).where(Score.stock_id == stk.id, Score.date == today)
+            )).scalar_one_or_none()
+            if existing_score is None:
+                s.add(Score(
+                    stock_id=stk.id, date=today,
+                    chip_score=score, fundamental_score=score, technical_score=score,
+                    total_score=float(score), reason="seeded for tier-limit test",
+                ))
+        await s.commit()
+    await cache.delete("stocks:top30")
+
+
+@pytest_asyncio.fixture
 async def auth_headers(client):
     """Create a fresh free-tier user and return Bearer-token headers."""
     import uuid

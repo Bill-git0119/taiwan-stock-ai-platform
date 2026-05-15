@@ -122,25 +122,6 @@ async def _load_data(session: AsyncSession, symbol: str, start: date, end: date)
     return stock, prices, score_map, chip_map
 
 
-def _make_synthetic_prices(start: date, end: date) -> list:
-    """Deterministic price series for dev/test when DB has no data."""
-    from datetime import timedelta
-    days = (end - start).days
-    if days <= 0:
-        return []
-    closes = []
-    base = 500.0
-    d = start
-    for i in range(days):
-        # Sin-wave + small drift, deterministic seed-by-day-index.
-        wave = math.sin(i / 7.0) * 12 + math.sin(i / 23.0) * 6
-        drift = i * 0.05
-        price = max(50.0, base + wave + drift)
-        closes.append((d, price))
-        d = d + timedelta(days=1)
-    return closes
-
-
 def _run(strategy: Strategy, symbol: str, ts: list, scores: dict, chips: dict, start: date, end: date) -> BacktestResult:
     closes = [p[1] for p in ts]
     dates = [p[0] for p in ts]
@@ -239,16 +220,27 @@ def _run(strategy: Strategy, symbol: str, ts: list, scores: dict, chips: dict, s
     )
 
 
+class NoRealDataError(Exception):
+    """Raised when a backtest is requested for a symbol/range with no real data.
+
+    Iron rule: never silently substitute synthetic prices — the trader must
+    know whether they're looking at real history or a smoke test.
+    """
+
+
 async def run_backtest(
     session: AsyncSession,
     symbol: str,
     start: date,
     end: date,
     strategy: Strategy = "ai_top_rank",
+    min_bars: int = 30,
 ) -> BacktestResult:
     stock, prices, score_map, chip_map = await _load_data(session, symbol, start, end)
-    if prices:
-        ts = [(p.date, float(p.close)) for p in prices]
-    else:
-        ts = _make_synthetic_prices(start, end)
+    if not prices or len(prices) < min_bars:
+        raise NoRealDataError(
+            f"symbol={symbol} has only {len(prices)} real bars "
+            f"in [{start}, {end}] — backtest aborted (need ≥{min_bars})."
+        )
+    ts = [(p.date, float(p.close)) for p in prices]
     return _run(strategy, symbol, ts, score_map, chip_map, start, end)

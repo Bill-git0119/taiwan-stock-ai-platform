@@ -21,24 +21,27 @@ async def _build_payload(session: AsyncSession, stock: Stock, as_of: date) -> di
         )
     ).scalars().all()
     closes = [float(p.close) for p in price_rows]
-    # Only last 60 sessions are used by indicators, but we pass them all.
     chip_rows = (
         await session.execute(
             select(ChipData)
             .where(ChipData.stock_id == stock.id, ChipData.date <= as_of)
             .order_by(ChipData.date.asc())
-            .limit(30)
+            .limit(120)
         )
     ).scalars().all()
-    chip_records = [
-        {
-            "foreign_buy": float(c.foreign_buy or 0),
-            "investment_buy": float(c.investment_buy or 0),
-            "dealer_buy": float(c.dealer_buy or 0),
-            "volume": int(price_rows[i].volume) if i < len(price_rows) else 0,
-        }
-        for i, c in enumerate(chip_rows)
-    ]
+    # Date-keyed alignment — see scanner_service for the same fix.
+    chip_by_date = {str(c.date): c for c in chip_rows}
+    chip_records: list[dict] = []
+    for p in price_rows:
+        c = chip_by_date.get(str(p.date))
+        chip_records.append({
+            "date": str(p.date),
+            "foreign_buy": float(c.foreign_buy or 0) if c else 0.0,
+            "investment_buy": float(c.investment_buy or 0) if c else 0.0,
+            "dealer_buy": float(c.dealer_buy or 0) if c else 0.0,
+            "volume": int(p.volume or 0),
+            "chip_available": c is not None,
+        })
     return {
         "symbol": stock.symbol,
         "name": stock.name,

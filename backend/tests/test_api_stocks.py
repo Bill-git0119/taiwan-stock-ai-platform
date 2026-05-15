@@ -2,7 +2,9 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_top10_anonymous_is_free_tier(client):
+async def test_top10_anonymous_is_free_tier(client, seeded_scores):
+    from app.services.cache_service import cache
+    await cache.delete("stocks:top30")
     r = await client.get("/api/v1/stocks/top10")
     assert r.status_code == 200
     body = r.json()
@@ -22,17 +24,28 @@ async def test_top10_shortcut(client):
 
 
 @pytest.mark.asyncio
-async def test_stock_detail_fallback(client):
-    r = await client.get("/api/v1/stocks/2330")
+async def test_top10_empty_when_no_scores(client):
+    """P0 audit: when DB has no scores, return empty — never fabricate."""
+    from app.services.cache_service import cache
+    # Wipe scores so this test isolates the empty-DB path. Idempotent.
+    from sqlalchemy import delete
+
+    from app.db.models import Score
+    from app.db.session import async_session_maker
+    async with async_session_maker() as s:
+        await s.execute(delete(Score))
+        await s.commit()
+    await cache.delete("stocks:top30")
+    r = await client.get("/api/v1/stocks/top10")
     assert r.status_code == 200
-    j = r.json()
-    assert j["symbol"] == "2330"
-    assert j["latest_score"]["total_score"] > 0
+    body = r.json()
+    assert body["items"] == []
 
 
 @pytest.mark.asyncio
-async def test_stock_detail_unknown(client):
-    r = await client.get("/api/v1/stocks/NOSUCH")
+async def test_stock_detail_unknown_returns_404(client):
+    """P0 audit: unknown symbol must 404, not return mocked fallback stock."""
+    r = await client.get("/api/v1/stocks/NOSUCH_TICKER_XYZ")
     assert r.status_code == 404
 
 

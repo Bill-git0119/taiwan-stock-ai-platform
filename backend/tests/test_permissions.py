@@ -13,7 +13,10 @@ async def _set_plan(email: str, plan: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_free_user_sees_top3(client, auth_headers):
+async def test_free_user_sees_top3(client, auth_headers, seeded_scores):
+    # Clear top30 cache so seeded_scores is observed for this test
+    from app.services.cache_service import cache
+    await cache.delete("stocks:top30")
     headers, _ = auth_headers
     r = await client.get("/api/v1/top10", headers=headers)
     assert r.status_code == 200
@@ -25,7 +28,9 @@ async def test_free_user_sees_top3(client, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_pro_user_sees_top10(client, auth_headers):
+async def test_pro_user_sees_top10(client, auth_headers, seeded_scores):
+    from app.services.cache_service import cache
+    await cache.delete("stocks:top30")
     headers, email = auth_headers
     await _set_plan(email, Plan.PRO)
     r = await client.get("/api/v1/top10", headers=headers)
@@ -36,14 +41,16 @@ async def test_pro_user_sees_top10(client, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_elite_user_sees_top30(client, auth_headers):
+async def test_elite_user_sees_top30(client, auth_headers, seeded_scores):
+    from app.services.cache_service import cache
+    await cache.delete("stocks:top30")
     headers, email = auth_headers
     await _set_plan(email, Plan.ELITE)
     r = await client.get("/api/v1/top10", headers=headers)
     body = r.json()
     assert body["tier"]["plan"] == "elite"
     assert body["tier"]["limit"] == 30
-    assert len(body["items"]) >= 10  # mock has 30
+    assert len(body["items"]) == 30
 
 
 @pytest.mark.asyncio

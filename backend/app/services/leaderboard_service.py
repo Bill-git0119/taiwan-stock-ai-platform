@@ -1,18 +1,18 @@
-"""Pick-tracking + leaderboard.
+"""Pick-tracking + leaderboard — REAL data only.
 
-If `stock_picks` table is populated by the daily collector, we measure
-return_pct via current price. If empty (cold start), we synthesize a
-deterministic leaderboard from the cached top30 so the UI is never empty.
+Iron rule: never fabricate performance numbers. The leaderboard reflects
+exactly what `stock_picks` measured. Empty table → empty leaderboard +
+"tracking_started_at" hint so the caller knows when real data will arrive.
 """
 from __future__ import annotations
 
 from datetime import date, timedelta
 from typing import List
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import DailyPrice, Stock, StockPick
+from app.db.models import StockPick
 
 
 async def weekly_leaderboard(session: AsyncSession, limit: int = 10) -> List[dict]:
@@ -26,31 +26,30 @@ async def weekly_leaderboard(session: AsyncSession, limit: int = 10) -> List[dic
             .limit(limit)
         )
     ).scalars().all()
-    if rows:
-        return [
-            {
-                "rank": i + 1,
-                "symbol": r.symbol, "name": r.name,
-                "entry_price": r.entry_price,
-                "return_pct": round(r.return_pct, 4),
-                "picked_on": r.date.isoformat(),
-            }
-            for i, r in enumerate(rows)
-        ]
-
-    # Fallback: synth deterministic positives (typical AI-pick outcome)
-    from app.api.v1.endpoints.stocks import _MOCK_TOP30
-    sorted_mock = sorted(_MOCK_TOP30, key=lambda s: s.total_score, reverse=True)[:limit]
     return [
         {
             "rank": i + 1,
-            "symbol": s.symbol, "name": s.name,
-            "entry_price": 0.0,
-            "return_pct": round(0.05 + (limit - i) / 100, 4),  # +5%..+15% mock perf
-            "picked_on": (today - timedelta(days=(i % 5) + 1)).isoformat(),
+            "symbol": r.symbol, "name": r.name,
+            "entry_price": r.entry_price,
+            "return_pct": round(r.return_pct, 4),
+            "picked_on": r.date.isoformat(),
         }
-        for i, s in enumerate(sorted_mock)
+        for i, r in enumerate(rows)
     ]
+
+
+async def leaderboard_status(session: AsyncSession) -> dict:
+    """How far along is real pick tracking? Lets the UI explain empty state
+    honestly instead of pretending there are results."""
+    total = (await session.execute(select(func.count(StockPick.id)))).scalar() or 0
+    earliest = (await session.execute(select(func.min(StockPick.date)))).scalar()
+    latest = (await session.execute(select(func.max(StockPick.date)))).scalar()
+    return {
+        "total_picks_tracked": int(total),
+        "tracking_started_at": earliest.isoformat() if earliest else None,
+        "latest_pick_at": latest.isoformat() if latest else None,
+        "has_data": total > 0,
+    }
 
 
 async def record_picks(session: AsyncSession, day: date, picks: list[dict]) -> int:

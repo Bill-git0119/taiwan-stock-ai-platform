@@ -2,18 +2,25 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_leaderboard_weekly(client):
+async def test_leaderboard_weekly_returns_honest_empty(client):
+    """P0 audit: leaderboard no longer fabricates results when picks empty."""
     r = await client.get("/api/v1/leaderboard/weekly")
     assert r.status_code == 200
     body = r.json()
     assert body["period"] == "7d"
-    assert isinstance(body["items"], list) and len(body["items"]) > 0
-    top = body["items"][0]
-    assert "symbol" in top and "return_pct" in top
+    assert isinstance(body["items"], list)
+    # Items may be empty (cold start) — the contract is "no fabrication",
+    # not "always populated". When empty, status must say so.
+    if not body["items"]:
+        assert body["status"]["has_data"] is False
+    else:
+        for r_ in body["items"]:
+            assert "symbol" in r_ and "return_pct" in r_
 
 
 @pytest.mark.asyncio
-async def test_blog_index_seeds(client):
+async def test_blog_index_seeds(client, seeded_scores):
+    """Blog generator needs real scores — P0 audit removed mock fallback."""
     r = await client.get("/api/v1/blog/")
     assert r.status_code == 200
     posts = r.json()
