@@ -8,9 +8,10 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     backtest, brief, correlation, datahub, decisions, health, intelligence,
-    intraday, leaderboard, long_term, market, narrative, performance,
-    persistence, portfolio, quality, research_report, risk, scanner, stocks,
-    strategy_lab, strategy_ranking, stress, trade_plan, universe,
+    intraday, leaderboard, long_term, market, narrative, narrative_v2,
+    performance, persistence, portfolio, quality, research_report, risk,
+    scanner, stocks, strategy_lab, strategy_ranking, stress, trade_plan,
+    universe,
 )
 
 api_router = APIRouter()
@@ -18,6 +19,7 @@ api_router.include_router(health.router, prefix="/health", tags=["health"])
 api_router.include_router(datahub.router, prefix="/datahub", tags=["datahub"])
 api_router.include_router(decisions.router, prefix="/decisions", tags=["decisions"])
 api_router.include_router(long_term.router, prefix="/long-term", tags=["long-term"])
+api_router.include_router(narrative_v2.router, prefix="/narrative-v2", tags=["narrative-v2"])
 api_router.include_router(stocks.router, prefix="/stocks", tags=["stocks"])
 api_router.include_router(market.router, prefix="/market", tags=["market"])
 api_router.include_router(backtest.router, prefix="/backtest", tags=["backtest"])
